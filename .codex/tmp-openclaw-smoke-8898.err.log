@@ -1,0 +1,11 @@
+=E:\sumoAndQt\QQClaw\.codex\tmp-openclaw-smoke-8898.sqlite : 无法将“=E:\sumoAndQt\QQClaw\.codex\tmp-openclaw-smoke-889
+8.sqlite”项识别为 cmdlet、函数、脚本文件或可运行程序的名称。请检查名称的拼写，如果包括路径，请确保路径正确，然后再试一
+次。
+所在位置 行:1 字符: 1
++ ='E:\sumoAndQt\QQClaw\.codex\tmp-openclaw-smoke-8898.sqlite'; $env:OP ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (=E:\sumoAndQt\Q...oke-8898.sqlite:String) [], CommandNotFoundException
+    + FullyQualifiedErrorId : CommandNotFoundException
+ 
+(node:29796) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)

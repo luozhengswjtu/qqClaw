@@ -1,0 +1,63 @@
+[2m22:11:33[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/bootstrap[39m
+Error: connect ECONNREFUSED 127.0.0.1:8787
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[2m22:11:33[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/bootstrap[39m
+Error: connect ECONNREFUSED 127.0.0.1:8787
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[2m22:11:34[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/ai/chat[39m
+Error: connect ECONNREFUSED 127.0.0.1:8787
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[2m22:13:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/adoption[39m
+Error: connect ECONNREFUSED 127.0.0.1:8787
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[2m22:13:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/ai/chat[39m
+Error: connect ECONNREFUSED 127.0.0.1:8787
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[2m22:15:48[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/bootstrap[39m
+Error: connect ECONNREFUSED 127.0.0.1:8787
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[2m22:15:48[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/bootstrap[39m
+Error: connect ECONNREFUSED 127.0.0.1:8787
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[2m22:15:49[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/bootstrap[39m
+Error: connect ECONNREFUSED 127.0.0.1:8787
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[2m22:15:49[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/bootstrap[39m
+Error: connect ECONNREFUSED 127.0.0.1:8787
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[2m22:15:50[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/ai/chat[39m
+Error: connect ECONNREFUSED 127.0.0.1:8787
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[2m22:15:50[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/ai/chat[39m
+Error: connect ECONNREFUSED 127.0.0.1:8787
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[2m22:18:43[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/ai/chat[39m
+Error: connect ECONNREFUSED 127.0.0.1:8787
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[2m22:18:43[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/checkins/first_lobster_chat/complete[39m
+Error: connect ECONNREFUSED 127.0.0.1:8787
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[2m22:19:02[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/permissions[39m
+Error: connect ECONNREFUSED 127.0.0.1:8787
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[2m22:19:02[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/permissions[39m
+Error: connect ECONNREFUSED 127.0.0.1:8787
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[2m22:19:02[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/permissions[39m
+Error: connect ECONNREFUSED 127.0.0.1:8787
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[2m22:19:02[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/checkins/first_group_permission/complete[39m
+Error: connect ECONNREFUSED 127.0.0.1:8787
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[2m22:19:02[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/ai/summarize-group[39m
+Error: connect ECONNREFUSED 127.0.0.1:8787
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[2m22:19:02[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/ai/summarize-group[39m
+Error: connect ECONNREFUSED 127.0.0.1:8787
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[2m22:19:02[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/ai/summarize-group[39m
+Error: connect ECONNREFUSED 127.0.0.1:8787
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
+[2m22:19:02[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/checkins/first_enable_mentions/complete[39m
+Error: connect ECONNREFUSED 127.0.0.1:8787
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1637:16)
