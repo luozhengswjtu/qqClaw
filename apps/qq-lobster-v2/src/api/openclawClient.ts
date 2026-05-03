@@ -2,8 +2,13 @@ import type {
   Achievement,
   GroupPermissionScope,
   Interest,
+  LobsterChatContext,
+  LobsterImageAsset,
   LobsterProfile,
   LobsterReward,
+  LobsterDiaryEntry,
+  LobsterSpaceComment,
+  LobsterSpacePost,
   Personality,
   QQMessage,
   WorkLogEntry,
@@ -45,6 +50,97 @@ export interface OpenClawWorkLogOutput extends OpenClawAiOutput {
   latestWorkLogs: WorkLogEntry[]
 }
 
+export interface OpenClawDiaryState {
+  eligible: boolean
+  canTrigger: boolean
+  checks: Array<{
+    key: string
+    passed: boolean
+  }>
+  triggered: boolean
+  revealed: boolean
+  unlocked: boolean
+  entry: LobsterDiaryEntry | null
+  entries: LobsterDiaryEntry[]
+}
+
+export interface OpenClawDiaryOutput extends LobsterDiaryEntry {
+  durationMs?: number
+  workLogId?: string
+  checks?: OpenClawDiaryState['checks']
+  entries: LobsterDiaryEntry[]
+  triggered: boolean
+  alreadyTriggered: boolean
+}
+
+export interface OpenClawDiaryImageOutput {
+  image: LobsterImageAsset
+  entry: LobsterDiaryEntry
+  entries: LobsterDiaryEntry[]
+  source: 'real-ai' | 'mock-fallback'
+  durationMs: number
+}
+
+export interface OpenClawSpaceState {
+  owner: OpenClawLobsterProfile | null
+  posts: LobsterSpacePost[]
+}
+
+export interface OpenClawSpacePostOutput extends OpenClawAiOutput {
+  post: LobsterSpacePost
+  workLogId?: string
+  previewRequired: boolean
+  space: OpenClawSpaceState
+}
+
+export interface OpenClawSpaceCommentReplyOutput extends OpenClawAiOutput {
+  postId: string
+  comment: LobsterSpaceComment
+  replyComment: LobsterSpaceComment
+  workLogId?: string
+  previewRequired: true
+  space: OpenClawSpaceState
+}
+
+export interface OpenClawSpaceAwarenessEventInput {
+  type:
+    | 'group_summary_completed'
+    | 'reply_draft_created'
+    | 'work_log_created'
+    | 'hidden_diary_revealed'
+    | 'image_generated'
+    | 'space_comment_received'
+  sourceId?: string
+  outputId?: string
+  workLogId?: string
+  groupId?: string
+  groupTitle?: string
+  groupCount?: number
+  mentionCount?: number
+  sourceMessageId?: string
+  postId?: string
+  commentId?: string
+  title?: string
+  summary?: string
+  content?: string
+}
+
+export interface OpenClawSpaceAwarenessOutput {
+  posted: boolean
+  duplicate?: boolean
+  reason: string
+  assessment: {
+    shouldPost: boolean
+    score: number
+    kind: LobsterSpacePost['kind']
+    reason: string
+  }
+  post?: LobsterSpacePost
+  workLogId?: string
+  previewRequired?: false
+  space: OpenClawSpaceState
+}
+
 export interface OpenClawLobsterProfile extends LobsterProfile {
   adoptedAt?: string | null
   updatedAt?: string
@@ -60,6 +156,9 @@ interface OpenClawBootstrap {
   }>
   rewards: LobsterReward[]
   achievements: Achievement[]
+  messages: QQMessage[]
+  diary?: OpenClawDiaryState
+  space?: OpenClawSpaceState
   agent: OpenClawAgentRegistry
 }
 
@@ -139,10 +238,13 @@ export const openclawClient = {
     })
   },
 
-  chat(messages: Array<{ role: 'user' | 'assistant'; content: string }>) {
+  chat(
+    messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+    context?: LobsterChatContext,
+  ) {
     return requestJson<OpenClawAiOutput>('/api/ai/chat', {
       method: 'POST',
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify({ messages, context }),
     })
   },
 
@@ -178,6 +280,82 @@ export const openclawClient = {
       method: 'POST',
       body: JSON.stringify(input),
     })
+  },
+
+  hiddenDiaryState() {
+    return requestJson<OpenClawDiaryState>('/api/diary/hidden-first')
+  },
+
+  generateDiary(input: Record<string, unknown> = {}) {
+    return requestJson<OpenClawDiaryOutput>('/api/ai/generate-diary', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  },
+
+  revealHiddenDiary() {
+    return requestJson<OpenClawDiaryState>('/api/diary/hidden-first/reveal', {
+      method: 'POST',
+    })
+  },
+
+  generateDiaryImage(input: { prompt?: string; size?: string } = {}) {
+    return requestJson<OpenClawDiaryImageOutput>(
+      '/api/diary/hidden-first/image',
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    )
+  },
+
+  spaceState() {
+    return requestJson<OpenClawSpaceState>('/api/space')
+  },
+
+  generateSpacePost(input: Record<string, unknown> = {}) {
+    return requestJson<OpenClawSpacePostOutput>('/api/ai/generate-space-post', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  },
+
+  recordSpaceAwarenessEvent(input: OpenClawSpaceAwarenessEventInput) {
+    return requestJson<OpenClawSpaceAwarenessOutput>(
+      '/api/space/awareness-events',
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    )
+  },
+
+  recordSpaceInteraction(input: {
+    postId: string
+    type: 'like' | 'share'
+    detail?: Record<string, unknown>
+  }) {
+    return requestJson<OpenClawSpaceState>('/api/space/interactions', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  },
+
+  addSpaceComment(input: { postId: string; content: string }) {
+    return requestJson<OpenClawSpaceState>('/api/space/comments', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  },
+
+  replyToSpaceComment(input: { postId: string; commentId?: string }) {
+    return requestJson<OpenClawSpaceCommentReplyOutput>(
+      '/api/ai/space-comment-reply',
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    )
   },
 
   agentRegistry() {

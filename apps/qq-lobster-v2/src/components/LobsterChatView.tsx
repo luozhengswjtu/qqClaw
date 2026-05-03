@@ -4,16 +4,19 @@ import {
   Check,
   ExternalLink,
   FileText,
+  Heart,
   MessageSquare,
   MoreHorizontal,
   Search,
   Send,
+  Share2,
   Settings,
   Smile,
   Sparkles,
   Target,
   Trophy,
   Users,
+  Image as ImageIcon,
 } from 'lucide-react'
 import {
   conversations,
@@ -27,6 +30,9 @@ import { useLobsterStore } from '../store/useLobsterStore'
 import type {
   GroupPermissionScope,
   LobsterChatLine,
+  LobsterChatContext,
+  LobsterDiaryEntry,
+  LobsterSpacePost,
   QQMessage,
   SummaryCardGroup,
   WorkLogEntry,
@@ -43,6 +49,36 @@ const chatStatusLabel: Record<
   actionable: '可操作',
   fallback: 'fallback',
   failed: '失败',
+}
+
+function toContextMessage(message: QQMessage) {
+  return {
+    id: message.id,
+    conversationId: message.conversationId,
+    senderName: message.senderName,
+    content: message.content,
+    sentAt: message.sentAt,
+    kind: message.kind,
+    sourceLabel: message.sourceLabel,
+  }
+}
+
+function createSummaryFollowUpContext(
+  group: SummaryCardGroup,
+): LobsterChatContext {
+  return {
+    type: 'summary_card_follow_up',
+    summaryCard: {
+      groupId: group.groupId,
+      groupTitle: group.groupTitle,
+      summary: group.summary,
+      source: group.source,
+      outputId: group.outputId,
+      sourceMessageIds: group.sourceMessageIds,
+      mentions: group.mentions.map(toContextMessage),
+      sourceMessages: group.sourceMessages.map(toContextMessage),
+    },
+  }
 }
 
 function Avatar({ label, active }: { label: string; active?: boolean }) {
@@ -228,17 +264,14 @@ function PermissionRequestCard({
 function SummaryCard({
   groups,
   onOpenSource,
-  onViewSummary,
   onRequestReplyDraft,
   onAskFollowUp,
 }: {
   groups: SummaryCardGroup[]
   onOpenSource: (message: QQMessage) => void
-  onViewSummary: () => void
   onRequestReplyDraft: (groupId: string, sourceMessageId?: string) => void
-  onAskFollowUp: () => void
+  onAskFollowUp: (group: SummaryCardGroup) => void
 }) {
-  const [expanded, setExpanded] = useState(false)
   const [activeGroupId, setActiveGroupId] = useState(groups[0]?.groupId ?? '')
   const activeGroup =
     groups.find((group) => group.groupId === activeGroupId) ?? groups[0]
@@ -254,11 +287,6 @@ function SummaryCard({
     primarySignal?.sourceLabel ??
     (primarySignal ? `${primarySignal.senderName} / ${primarySignal.sentAt}` : null)
 
-  function viewSummary() {
-    setExpanded((current) => !current)
-    onViewSummary()
-  }
-
   return (
     <div className="mt-3 rounded-lg border border-qq-100 bg-white p-4">
       {groups.length > 1 ? (
@@ -273,10 +301,7 @@ function SummaryCard({
               ].join(' ')}
               type="button"
               key={group.groupId}
-              onClick={() => {
-                setActiveGroupId(group.groupId)
-                setExpanded(false)
-              }}
+              onClick={() => setActiveGroupId(group.groupId)}
             >
               {group.groupTitle}
             </button>
@@ -333,19 +358,6 @@ function SummaryCard({
         </div>
         </div>
       ) : null}
-      {expanded ? (
-        <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-xs font-semibold text-ink-700">完整摘要</p>
-            <span className="rounded bg-white px-2 py-0.5 text-xs text-ink-500">
-              展开态
-            </span>
-          </div>
-          <p className="mt-2 whitespace-pre-line text-sm leading-6 text-ink-800">
-            {activeGroup.summary}
-          </p>
-        </div>
-      ) : null}
       {fallbackSource ? (
         <div className="mt-3 flex flex-wrap gap-2">
           <button
@@ -355,13 +367,6 @@ function SummaryCard({
           >
             <ExternalLink className="h-3.5 w-3.5" />
             跳回原群
-          </button>
-          <button
-            className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-ink-600 transition hover:bg-slate-200"
-            type="button"
-            onClick={viewSummary}
-          >
-            {expanded ? '收起完整摘要' : '查看完整摘要'}
           </button>
           <button
             className="inline-flex items-center gap-1.5 rounded-lg bg-lobster-50 px-3 py-1.5 text-xs font-semibold text-lobster-700 transition hover:bg-lobster-100"
@@ -376,12 +381,12 @@ function SummaryCard({
             className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-ink-500 ring-1 ring-slate-200 transition hover:bg-slate-50"
             type="button"
           >
-            降低提醒频率
+            调整提醒时间
           </button>
           <button
             className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-ink-500 ring-1 ring-slate-200 transition hover:bg-slate-50"
             type="button"
-            onClick={onAskFollowUp}
+            onClick={() => onAskFollowUp(activeGroup)}
           >
             继续追问
           </button>
@@ -510,12 +515,268 @@ function WorkLogCard({
   )
 }
 
+function DiaryCard({
+  entry,
+  onGenerateImage,
+}: {
+  entry: LobsterDiaryEntry
+  onGenerateImage?: () => void
+}) {
+  const [imageRequested, setImageRequested] = useState(false)
+  const canGenerateImage = !entry.image && !imageRequested && onGenerateImage
+
+  return (
+    <div className="mt-3 overflow-hidden rounded-lg border border-lobster-100 bg-white shadow-sm">
+      {entry.image ? (
+        <div className="bg-ink-900">
+          <img
+            alt={entry.title}
+            className="h-auto w-full object-cover"
+            src={entry.image.url}
+          />
+        </div>
+      ) : null}
+      <div className="bg-[#fff7e8] px-4 py-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-ink-900">{entry.title}</p>
+            <p className="mt-1 text-xs text-ink-500">
+              {new Date(entry.createdAt).toLocaleDateString()} · {entry.source}
+            </p>
+          </div>
+          <LobsterAvatar size="sm" mood="happy" animated />
+        </div>
+        <p className="mt-4 rounded-lg bg-white/80 px-3 py-3 text-sm font-semibold leading-6 text-lobster-700">
+          {entry.quote}
+        </p>
+        {canGenerateImage ? (
+          <button
+            className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-lobster-700 ring-1 ring-lobster-100 transition hover:bg-lobster-50"
+            type="button"
+            onClick={() => {
+              setImageRequested(true)
+              onGenerateImage?.()
+            }}
+          >
+            <ImageIcon className="h-3.5 w-3.5" />
+            生成日记图片
+          </button>
+        ) : null}
+        {imageRequested && !entry.image ? (
+          <p className="mt-3 text-xs text-ink-500">日记图片生成中...</p>
+        ) : null}
+      </div>
+      <div className="px-4 py-4">
+        <p className="whitespace-pre-line text-sm leading-6 text-ink-800">
+          {entry.text}
+        </p>
+        <div className="mt-4 rounded-lg border border-qq-100 bg-qq-50 px-3 py-3">
+          <p className="text-xs font-semibold text-qq-700">今日成就</p>
+          <p className="mt-1 text-sm leading-6 text-ink-800">
+            {entry.todayAchievement}
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SpacePostCard({
+  post,
+  compact,
+  selected,
+  onOpenSpace,
+  onSelect,
+  onLike,
+  onShare,
+  onReply,
+}: {
+  post: LobsterSpacePost
+  compact?: boolean
+  selected?: boolean
+  onOpenSpace?: () => void
+  onSelect?: (postId: string) => void
+  onLike?: (postId: string) => void
+  onShare?: (postId: string) => void
+  onReply?: (postId: string, commentId?: string) => void
+}) {
+  const comments = post.comments ?? []
+  const likeCount = post.likeCount ?? 0
+  const commentCount = post.commentCount ?? comments.length
+  const shareCount = post.shareCount ?? 0
+  const replyTarget =
+    comments.find((comment) => comment.authorType === 'friend') ?? comments[0]
+
+  return (
+    <div
+      className={[
+        'mt-3 overflow-hidden rounded-lg border bg-white transition',
+        selected ? 'border-qq-400 ring-4 ring-qq-100' : 'border-qq-100',
+      ].join(' ')}
+    >
+      <div className="bg-[#eaf4ff] px-4 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <LobsterAvatar size="sm" mood="happy" />
+            <div>
+              <p className="text-sm font-semibold text-ink-900">
+                {post.authorName} 的龙虾空间
+              </p>
+              <p className="text-xs text-ink-500">
+                {post.kind === 'diary' ? '日记动态' : '成就动态'}
+              </p>
+            </div>
+          </div>
+          <span className="rounded bg-white px-2 py-1 text-xs text-qq-700">
+            小龙虾发布
+          </span>
+        </div>
+      </div>
+      <div className="px-4 py-4">
+        <p className="whitespace-pre-line text-sm leading-6 text-ink-900">
+          {post.content}
+        </p>
+        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-ink-500">
+          <span>{likeCount} 赞</span>
+          <span>{commentCount} 评论</span>
+          <span>{shareCount} 分享</span>
+        </div>
+        {compact ? (
+          <button
+            className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-qq-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-qq-600"
+            type="button"
+            onClick={onOpenSpace}
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            进入龙虾空间
+          </button>
+        ) : (
+          <>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                className={[
+                  'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition',
+                  selected
+                    ? 'bg-qq-500 text-white'
+                    : 'bg-qq-50 text-qq-700 hover:bg-qq-100',
+                ].join(' ')}
+                type="button"
+                onClick={() => onSelect?.(post.id)}
+              >
+                <Check className="h-3.5 w-3.5" />
+                {selected ? '已选择' : '选择动态'}
+              </button>
+              <button
+                className={[
+                  'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition',
+                  post.likedByMe
+                    ? 'bg-lobster-100 text-lobster-700'
+                    : 'bg-slate-100 text-ink-600 hover:bg-lobster-50',
+                ].join(' ')}
+                type="button"
+                onClick={() => onLike?.(post.id)}
+              >
+                <Heart className="h-3.5 w-3.5" />
+                {post.likedByMe ? '已赞' : '点赞'}
+              </button>
+              <button
+                className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-ink-600 transition hover:bg-qq-50 hover:text-qq-700"
+                type="button"
+                onClick={() => onShare?.(post.id)}
+              >
+                <Share2 className="h-3.5 w-3.5" />
+                分享
+              </button>
+              <button
+                className="inline-flex items-center gap-1.5 rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-semibold text-ink-600 transition hover:bg-qq-50 hover:text-qq-700"
+                type="button"
+                onClick={() => onReply?.(post.id, replyTarget?.id)}
+              >
+                <MessageSquare className="h-3.5 w-3.5" />
+                小龙虾回复
+              </button>
+            </div>
+            <div className="mt-4 space-y-2">
+              {comments.slice(0, 4).map((comment) => (
+                <div
+                  className="rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5"
+                  key={comment.id}
+                >
+                  <div className="flex items-center justify-between gap-3 text-ink-500">
+                    <span>
+                      {comment.authorName}
+                      {comment.authorType === 'friend_lobster' ? '的小龙虾' : ''}
+                    </span>
+                    <span>
+                      {comment.previewRequired ? '预览' : '评论'}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-ink-800">{comment.content}</p>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function HiddenDiarySurprise({
+  lobsterName,
+  onOpen,
+}: {
+  lobsterName: string
+  onOpen: () => void
+}) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-ink-900/30 px-4">
+      <div className="w-full max-w-sm overflow-hidden rounded-lg border border-white/80 bg-white shadow-panel">
+        <div className="bg-[#fff7e8] px-5 py-5 text-center">
+          <div className="mx-auto w-fit animate-bounce">
+            <LobsterAvatar size="lg" mood="happy" animated />
+          </div>
+          <p className="mt-4 text-base font-semibold text-ink-900">
+            {lobsterName} 探出头
+          </p>
+          <p className="mt-3 whitespace-pre-line text-sm leading-6 text-ink-700">
+            队长，我刚刚偷偷写了一篇日记。
+            {'\n'}
+            要看看吗？
+          </p>
+        </div>
+        <div className="px-5 py-4">
+          <button
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-lobster-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-lobster-600"
+            type="button"
+            onClick={onOpen}
+          >
+            <Sparkles className="h-4 w-4" />
+            要看看
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function LobsterChatView() {
   const [draft, setDraft] = useState('')
+  const [selectedSpacePostId, setSelectedSpacePostId] = useState<string | null>(
+    null,
+  )
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const lobsterProfile = useLobsterStore((state) => state.lobsterProfile)
   const chatLines = useLobsterStore((state) => state.lobsterChatLines)
   const sending = useLobsterStore((state) => state.lobsterChatBusy)
+  const diarySurpriseVisible = useLobsterStore(
+    (state) => state.diarySurpriseVisible,
+  )
+  const diaryUnlocked = useLobsterStore((state) => state.diaryUnlocked)
+  const diaryEntries = useLobsterStore((state) => state.diaryEntries)
+  const spacePosts = useLobsterStore((state) => state.spacePosts)
+  const spaceUnlocked = useLobsterStore((state) => state.spaceUnlocked)
+  const appView = useLobsterStore((state) => state.appView)
   const currentCheckInId = useLobsterStore((state) => state.currentCheckInId)
   const completedCheckInIds = useLobsterStore(
     (state) => state.completedCheckInIds,
@@ -534,11 +795,24 @@ export function LobsterChatView() {
     (state) => state.setActiveConversation,
   )
   const openSummarySource = useLobsterStore((state) => state.openSummarySource)
-  const summarizeAuthorizedGroup = useLobsterStore(
-    (state) => state.summarizeAuthorizedGroup,
-  )
   const requestReplyDraft = useLobsterStore((state) => state.requestReplyDraft)
   const generateWorkLog = useLobsterStore((state) => state.generateWorkLog)
+  const openHiddenDiary = useLobsterStore((state) => state.openHiddenDiary)
+  const generateHiddenDiaryImage = useLobsterStore(
+    (state) => state.generateHiddenDiaryImage,
+  )
+  const openDiaryHistory = useLobsterStore((state) => state.openDiaryHistory)
+  const openLobsterChat = useLobsterStore((state) => state.openLobsterChat)
+  const openLobsterSpace = useLobsterStore((state) => state.openLobsterSpace)
+  const generateSpacePost = useLobsterStore((state) => state.generateSpacePost)
+  const likeSpacePost = useLobsterStore((state) => state.likeSpacePost)
+  const commentOnSpacePost = useLobsterStore(
+    (state) => state.commentOnSpacePost,
+  )
+  const shareSpacePost = useLobsterStore((state) => state.shareSpacePost)
+  const replyToSpaceComment = useLobsterStore(
+    (state) => state.replyToSpaceComment,
+  )
   const completedCount = completedCheckInIds.length
   const currentCheckIn = lobsterCheckIns.find(
     (item) => item.id === currentCheckInId,
@@ -557,14 +831,9 @@ export function LobsterChatView() {
     (completedCount / lobsterCheckIns.length) * 100,
   )
   const guideActionLabel: Record<string, string> = {
-    first_group_permission: '去设置权限',
-    first_enable_mentions: '生成群聊总结卡',
-    first_view_mentions: '查看群聊总结卡',
-    first_jump_source: '跳回群消息',
-    first_group_summary: '查看群摘要',
-    first_reply_draft: '写回复草稿',
+    first_group_permission: '处理群聊提醒',
     first_view_work_log: '查看工作记录',
-    first_space_post: '生成空间预览',
+    first_space_post: '进入龙虾空间',
     first_space_comment: '回复空间评论',
   }
   const personalityLabel =
@@ -573,6 +842,14 @@ export function LobsterChatView() {
   const interestLabels = lobsterProfile.interests
     .map((interest) => interestOptions.find((item) => item.id === interest)?.label)
     .filter((label): label is string => Boolean(label))
+  const effectiveSelectedSpacePostId =
+    selectedSpacePostId &&
+    spacePosts.some((post) => post.id === selectedSpacePostId)
+      ? selectedSpacePostId
+      : spacePosts[0]?.id
+  const selectedSpacePost =
+    spacePosts.find((post) => post.id === effectiveSelectedSpacePostId) ??
+    spacePosts[0]
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -601,28 +878,18 @@ export function LobsterChatView() {
       return
     }
 
-    if (activeCheckIn.id === 'first_enable_mentions') {
-      void summarizeAuthorizedGroup()
-      return
-    }
-
-    if (activeCheckIn.id === 'first_view_mentions') {
-      completeCheckIn('first_view_mentions')
-      return
-    }
-
-    if (activeCheckIn.id === 'first_group_summary') {
-      completeCheckIn('first_group_summary')
-      return
-    }
-
-    if (activeCheckIn.id === 'first_reply_draft') {
-      void requestReplyDraft()
-      return
-    }
-
     if (activeCheckIn.id === 'first_view_work_log') {
       void generateWorkLog()
+      return
+    }
+
+    if (activeCheckIn.id === 'first_space_post') {
+      void openLobsterSpace()
+      return
+    }
+
+    if (activeCheckIn.id === 'first_space_comment') {
+      void replyToSpaceComment()
       return
     }
 
@@ -656,12 +923,14 @@ export function LobsterChatView() {
         <SummaryCard
           groups={line.card.groups}
           onOpenSource={openSummarySource}
-          onViewSummary={() => completeCheckIn('first_group_summary')}
           onRequestReplyDraft={(groupId, sourceMessageId) =>
             void requestReplyDraft(groupId, sourceMessageId)
           }
-          onAskFollowUp={() =>
-            void sendLobsterChatMessage('这张群聊总结卡里最需要我马上处理什么？')
+          onAskFollowUp={(group) =>
+            void sendLobsterChatMessage(
+              '这张群聊总结卡里最需要我马上处理什么？',
+              createSummaryFollowUpContext(group),
+            )
           }
         />
       )
@@ -679,17 +948,169 @@ export function LobsterChatView() {
       )
     }
 
+    if (line.card.type === 'work_log_card') {
+      return (
+        <WorkLogCard
+          title={line.card.title}
+          text={line.card.text}
+          latestWorkLogs={line.card.latestWorkLogs}
+          source={line.card.source}
+        />
+      )
+    }
+
+    if (line.card.type === 'diary_card') {
+      return (
+        <DiaryCard
+          entry={line.card.entry}
+          onGenerateImage={() => void generateHiddenDiaryImage()}
+        />
+      )
+    }
+
     return (
-      <WorkLogCard
-        title={line.card.title}
-        text={line.card.text}
-        latestWorkLogs={line.card.latestWorkLogs}
-        source={line.card.source}
+      <SpacePostCard
+        post={line.card.post}
+        compact
+        selected={line.card.post.id === effectiveSelectedSpacePostId}
+        onOpenSpace={() => void openLobsterSpace()}
       />
     )
   }
 
+  function renderSpaceMain() {
+    return (
+      <main className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-[#f8fbff]">
+        <header className="flex h-16 shrink-0 items-center justify-between border-b border-slate-100 bg-white px-5">
+          <div className="flex items-center gap-3">
+            <LobsterAvatar size="sm" mood="happy" />
+            <div>
+              <h1 className="text-base font-semibold text-ink-900">
+                {lobsterProfile.name} 的龙虾空间
+              </h1>
+              <p className="mt-1 text-xs text-ink-500">
+                动态只由小龙虾发布 · 你可以访问、点赞、评论和分享
+              </p>
+            </div>
+          </div>
+          <button
+            className="inline-flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-qq-700 ring-1 ring-qq-100 transition hover:bg-qq-50"
+            type="button"
+            onClick={openLobsterChat}
+          >
+            <MessageSquare className="h-3.5 w-3.5" />
+            私聊
+          </button>
+        </header>
+
+        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-6 py-6">
+          <section className="overflow-hidden rounded-lg border border-qq-100 bg-white">
+            <div className="bg-[#dff0ff] px-5 py-5">
+              <div className="flex items-end justify-between gap-4">
+                <div className="flex items-center gap-4">
+                  <LobsterAvatar size="lg" mood="happy" />
+                  <div>
+                    <p className="text-lg font-semibold text-ink-900">
+                      {lobsterProfile.name}
+                    </p>
+                    <p className="mt-1 text-sm text-ink-600">
+                      QQ 里的小龙虾伙伴，正在慢慢营业。
+                    </p>
+                  </div>
+                </div>
+                <span className="rounded bg-white px-3 py-1.5 text-xs font-semibold text-qq-700">
+                  龙虾空间
+                </span>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 border-t border-qq-100 text-center text-xs text-ink-500">
+              <div className="px-3 py-3">
+                <span className="block text-sm font-semibold text-ink-900">
+                  {spacePosts.length}
+                </span>
+                动态
+              </div>
+              <div className="border-x border-qq-100 px-3 py-3">
+                <span className="block text-sm font-semibold text-ink-900">
+                  {spacePosts.reduce((count, post) => count + post.likeCount, 0)}
+                </span>
+                点赞
+              </div>
+              <div className="px-3 py-3">
+                <span className="block text-sm font-semibold text-ink-900">
+                  {spacePosts.reduce((count, post) => count + post.commentCount, 0)}
+                </span>
+                评论
+              </div>
+            </div>
+          </section>
+
+          <div className="mt-5 space-y-4">
+            {spacePosts.length > 0 ? (
+              spacePosts.map((post) => (
+                <SpacePostCard
+                  key={post.id}
+                  post={post}
+                  selected={post.id === effectiveSelectedSpacePostId}
+                  onSelect={setSelectedSpacePostId}
+                  onLike={(postId) => void likeSpacePost(postId)}
+                  onShare={(postId) => void shareSpacePost(postId)}
+                  onReply={(postId, commentId) =>
+                    void replyToSpaceComment(postId, commentId)
+                  }
+                />
+              ))
+            ) : (
+              <div className="rounded-lg border border-dashed border-qq-200 bg-white px-5 py-6 text-sm leading-6 text-ink-600">
+                空间还没有动态。先从右侧打卡生成一条小龙虾自己的空间动态。
+              </div>
+            )}
+          </div>
+        </div>
+
+        <footer className="shrink-0 border-t border-slate-100 bg-white px-5 py-4">
+          <div className="flex items-end gap-3">
+            <textarea
+              className="h-16 min-h-16 flex-1 resize-none rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition placeholder:text-ink-500 focus:border-qq-500 focus:bg-white focus:ring-4 focus:ring-qq-100"
+              placeholder={
+                selectedSpacePost
+                  ? `评论已选择动态：${selectedSpacePost.content.slice(0, 18)}`
+                  : '空间暂无动态'
+              }
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              disabled={!selectedSpacePost}
+            />
+            <button
+              className="inline-flex h-10 items-center gap-2 rounded-lg bg-qq-500 px-4 text-sm font-semibold text-white transition hover:bg-qq-600 disabled:cursor-not-allowed disabled:bg-slate-300"
+              type="button"
+              disabled={!selectedSpacePost || !draft.trim()}
+              onClick={() => {
+                if (!selectedSpacePost) {
+                  return
+                }
+                const content = draft.trim()
+                setDraft('')
+                void commentOnSpacePost(selectedSpacePost.id, content)
+              }}
+            >
+              <Send className="h-4 w-4" />
+              评论
+            </button>
+          </div>
+        </footer>
+      </main>
+    )
+  }
+
   return (
+    <>
+    {diarySurpriseVisible ? (
+      <HiddenDiarySurprise
+        lobsterName={lobsterProfile.name}
+        onOpen={() => void openHiddenDiary()}
+      />
+    ) : null}
     <div className="flex h-screen min-h-[680px] bg-[#edf3fb] p-4 text-ink-900">
       <div className="mx-auto grid h-full min-h-0 w-full max-w-[1440px] grid-cols-[74px_minmax(220px,280px)_minmax(520px,1fr)_340px] overflow-hidden rounded-lg border border-white/80 bg-white shadow-panel">
         <aside className="flex flex-col items-center justify-between bg-[#e8f2ff] px-3 py-4">
@@ -697,11 +1118,31 @@ export function LobsterChatView() {
             <Avatar label={currentUser.avatar} active />
             <nav className="flex flex-col items-center gap-2">
               <button
-                className="grid h-11 w-11 place-items-center rounded-lg bg-white text-qq-600 shadow-sm"
+                className={[
+                  'grid h-11 w-11 place-items-center rounded-lg transition',
+                  appView === 'lobster_space'
+                    ? 'text-ink-500 hover:bg-white hover:text-qq-600'
+                    : 'bg-white text-qq-600 shadow-sm',
+                ].join(' ')}
                 type="button"
                 aria-label="消息"
+                onClick={openLobsterChat}
               >
                 <MessageSquare className="h-5 w-5" />
+              </button>
+              <button
+                className={[
+                  'grid h-11 w-11 place-items-center rounded-lg transition',
+                  appView === 'lobster_space'
+                    ? 'bg-white text-qq-600 shadow-sm'
+                    : 'text-ink-500 hover:bg-white hover:text-qq-600',
+                ].join(' ')}
+                type="button"
+                aria-label="龙虾空间"
+                title="龙虾空间"
+                onClick={() => void openLobsterSpace()}
+              >
+                <Share2 className="h-5 w-5" />
               </button>
               <button
                 className="grid h-11 w-11 place-items-center rounded-lg text-ink-500 transition hover:bg-white hover:text-qq-600"
@@ -773,6 +1214,7 @@ export function LobsterChatView() {
             <button
               className="grid w-full grid-cols-[42px_1fr_auto] gap-3 rounded-lg bg-white px-2 py-3 text-left shadow-sm"
               type="button"
+              onClick={openLobsterChat}
             >
               <LobsterAvatar size="sm" mood="happy" />
               <span className="min-w-0">
@@ -809,6 +1251,7 @@ export function LobsterChatView() {
           </div>
         </aside>
 
+        {appView === 'lobster_space' ? renderSpaceMain() : (
         <main className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-[#f8fbff]">
           <header className="flex h-16 shrink-0 items-center justify-between border-b border-slate-100 bg-white px-5">
             <div className="flex items-center gap-3">
@@ -948,6 +1391,7 @@ export function LobsterChatView() {
             </div>
           </footer>
         </main>
+        )}
 
         <aside className="min-h-0 overflow-hidden border-l border-slate-100 bg-white">
           <div className="scrollbar-thin h-full overflow-y-auto px-5 py-5">
@@ -985,6 +1429,74 @@ export function LobsterChatView() {
                 小龙虾私聊会先经过 OpenClaw。低风险闲聊直接进入聊天流，后续卡片和动作会在审查后再开放操作。
               </p>
             </section>
+
+            {diaryUnlocked && diaryEntries.length > 0 ? (
+              <section className="mt-5 rounded-lg border border-lobster-100 bg-[#fff7e8] px-4 py-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-lobster-600" />
+                    <p className="text-sm font-semibold text-ink-900">日记入口</p>
+                  </div>
+                  <span className="rounded bg-white px-2 py-1 text-xs text-lobster-700">
+                    {diaryEntries.length} 篇
+                  </span>
+                </div>
+                <p className="mt-2 line-clamp-2 text-xs leading-5 text-ink-600">
+                  {diaryEntries[0].quote}
+                </p>
+                <button
+                  className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-lobster-700 ring-1 ring-lobster-100 transition hover:bg-lobster-50"
+                  type="button"
+                  onClick={openDiaryHistory}
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  查看历史日记
+                </button>
+              </section>
+            ) : null}
+
+            {diaryUnlocked || spaceUnlocked ? (
+              <section className="mt-5 rounded-lg border border-qq-100 bg-white px-4 py-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Share2 className="h-4 w-4 text-qq-600" />
+                    <p className="text-sm font-semibold text-ink-900">
+                      龙虾空间
+                    </p>
+                  </div>
+                  <span className="rounded bg-qq-50 px-2 py-1 text-xs text-qq-700">
+                    {spacePosts.length} 条
+                  </span>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-ink-500">
+                  空间动态由小龙虾自己发布。你可以访问、点赞、评论和分享。
+                </p>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-qq-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-qq-600 disabled:cursor-not-allowed disabled:bg-slate-300"
+                    type="button"
+                    disabled={sending}
+                    onClick={() =>
+                      spacePosts.length > 0
+                        ? void openLobsterSpace()
+                        : void generateSpacePost()
+                    }
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    {spacePosts.length > 0 ? '进入空间' : '存入空间'}
+                  </button>
+                  <button
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-ink-600 transition hover:bg-qq-50 hover:text-qq-700 disabled:cursor-not-allowed disabled:text-slate-300"
+                    type="button"
+                    disabled={!selectedSpacePost || sending}
+                    onClick={() => void replyToSpaceComment(selectedSpacePost?.id)}
+                  >
+                    <MessageSquare className="h-3.5 w-3.5" />
+                    回复评论
+                  </button>
+                </div>
+              </section>
+            ) : null}
 
             <section className="mt-5 rounded-lg border border-qq-100 bg-qq-50 px-4 py-4">
               <div className="flex items-center gap-2">
@@ -1053,22 +1565,22 @@ export function LobsterChatView() {
                     const done = completedCheckInIds.includes(item.id)
                     const active = item.id === activeCheckIn?.id
                     const label = `${index + 1}. ${item.title}`
-                  return (
-                    <span
-                      aria-label={label}
-                      className={[
-                        'h-2.5 w-2.5 rounded-full transition',
-                        done
-                          ? 'bg-emerald-400'
-                          : active
-                            ? 'bg-qq-500 ring-4 ring-qq-100'
-                            : 'bg-white ring-1 ring-slate-200',
-                      ].join(' ')}
-                      key={item.id}
-                      title={label}
-                    />
-                  )
-                })}
+                    return (
+                      <span
+                        aria-label={label}
+                        className={[
+                          'h-2.5 w-2.5 rounded-full transition',
+                          done
+                            ? 'bg-emerald-400'
+                            : active
+                              ? 'bg-qq-500 ring-4 ring-qq-100'
+                              : 'bg-white ring-1 ring-slate-200',
+                        ].join(' ')}
+                        key={item.id}
+                        title={label}
+                      />
+                    )
+                  })}
                 </div>
               </div>
             </section>
@@ -1107,5 +1619,6 @@ export function LobsterChatView() {
         </aside>
       </div>
     </div>
+    </>
   )
 }

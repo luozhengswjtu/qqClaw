@@ -1,27 +1,44 @@
 import { createServer } from 'node:http'
+import { createReadStream, existsSync } from 'node:fs'
 import {
+  attachHiddenDiaryImage,
   completeCheckin,
   dbPath,
   executeRegisteredTool,
   getAgentRegistry,
+  getDiaryTriggerContext,
   getBootstrap,
   getCapabilities,
   getEvents,
   getAchievements,
+  getHiddenDiaryState,
   getMessagesForGroup,
   getMemories,
   getRewards,
   getReviewResults,
+  getSpaceState,
   getToolRuns,
   getTools,
   getWorkLogs,
   initDb,
+  recordSpaceInteraction,
+  revealHiddenDiaryEntry,
   resolveCapability,
   saveAdoption,
+  saveHiddenDiaryEntry,
+  saveSpaceComment,
+  saveSpacePost,
   savePermissions,
+  writeEvent,
   writeWorkLog,
 } from './db.js'
 import { getAiStatus, runAiTask } from './aiAdapter.js'
+import {
+  generateDiaryImage,
+  getGeneratedImageContentType,
+  getImageStatus,
+  resolveGeneratedImagePath,
+} from './imageAdapter.js'
 
 const host = process.env.OPENCLAW_HOST || '127.0.0.1'
 const port = Number(process.env.OPENCLAW_PORT || 8787)
@@ -46,6 +63,26 @@ function sendError(response, error) {
       message: error instanceof Error ? error.message : String(error),
     },
   })
+}
+
+function sendFile(response, filePath) {
+  if (!existsSync(filePath)) {
+    sendJson(response, 404, {
+      error: {
+        message: 'Generated image not found',
+      },
+    })
+    return
+  }
+
+  response.writeHead(200, {
+    'Access-Control-Allow-Origin': corsOrigin,
+    'Content-Type': getGeneratedImageContentType(filePath),
+    'Cache-Control': 'public, max-age=31536000, immutable',
+  })
+  createReadStream(filePath)
+    .on('error', (error) => sendError(response, error))
+    .pipe(response)
 }
 
 function readJson(request) {
@@ -93,6 +130,172 @@ function normalizeChatBody(body) {
   }
 }
 
+function pickDiaryQuote(text) {
+  return (
+    String(text || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean) || '我不是一个按钮，是会记得小事的 QQ 小伙伴。'
+  )
+}
+
+function pickSpaceComment(spaceState, postId, commentId) {
+  const post =
+    spaceState.posts.find((item) => item.id === postId) ?? spaceState.posts[0]
+  const comment =
+    post?.comments.find((item) => item.id === commentId) ??
+    post?.comments.find((item) => item.authorType !== 'lobster') ??
+    post?.comments[0] ??
+    null
+
+  return { post, comment }
+}
+
+function normalizeSpaceAwarenessEvent(body) {
+  const type = String(body.type || '').trim()
+  const sourceId = String(
+    body.sourceId ||
+      body.outputId ||
+      body.workLogId ||
+      body.commentId ||
+      body.postId ||
+      body.groupId ||
+      type ||
+      'unknown',
+  ).trim()
+
+  return {
+    ...body,
+    type,
+    sourceId,
+    groupId: body.groupId ? String(body.groupId) : null,
+    groupTitle: body.groupTitle ? String(body.groupTitle) : null,
+    title: body.title ? String(body.title) : null,
+    summary: body.summary ? String(body.summary) : null,
+    content: body.content ? String(body.content) : null,
+    mentionCount: Number(body.mentionCount || 0),
+    groupCount: Number(body.groupCount || 0),
+  }
+}
+
+function getSpaceAwarenessSourceKey(event) {
+  const type = event.type.replace(/[^a-zA-Z0-9_.:-]/g, '_') || 'unknown'
+  const sourceId = event.sourceId.replace(/[^a-zA-Z0-9_.:-]/g, '_') || 'unknown'
+  return `space-awareness:${type}:${sourceId}`
+}
+
+function assessSpaceAwarenessEvent(event) {
+  if (event.type === 'group_summary_completed') {
+    const score = event.mentionCount > 0 ? 4 : event.groupCount > 1 ? 3 : 2
+    return {
+      shouldPost: score >= 3,
+      score,
+      kind: 'status',
+      reason:
+        score >= 3
+          ? 'summary includes social signal or multiple groups'
+          : 'single low-signal summary is kept as memory only',
+    }
+  }
+
+  if (event.type === 'reply_draft_created') {
+    return {
+      shouldPost: Boolean(event.sourceMessageId || event.mentionCount > 0),
+      score: event.sourceMessageId || event.mentionCount > 0 ? 3 : 2,
+      kind: 'status',
+      reason: 'reply draft is worth posting when it comes from a concrete social signal',
+    }
+  }
+
+  if (event.type === 'work_log_created') {
+    return {
+      shouldPost: true,
+      score: 3,
+      kind: 'achievement',
+      reason: 'work log marks a visible progress checkpoint',
+    }
+  }
+
+  if (event.type === 'hidden_diary_revealed') {
+    return {
+      shouldPost: true,
+      score: 5,
+      kind: 'diary',
+      reason: 'revealed diary is a personal milestone',
+    }
+  }
+
+  if (event.type === 'image_generated') {
+    return {
+      shouldPost: true,
+      score: 4,
+      kind: 'status',
+      reason: 'generated image is a shareable creation event',
+    }
+  }
+
+  if (event.type === 'space_comment_received') {
+    return {
+      shouldPost: false,
+      score: 2,
+      kind: 'status',
+      reason: 'comment feedback should trigger a reply instead of a new post',
+    }
+  }
+
+  return {
+    shouldPost: false,
+    score: Number(event.score || 1),
+    kind: 'status',
+    reason: 'event is recorded but not valuable enough for a space post',
+  }
+}
+
+function buildSpaceAwarenessPost(event) {
+  if (event.type === 'group_summary_completed') {
+    const target = event.groupTitle || '授权群聊'
+    const mentionText =
+      event.mentionCount > 0
+        ? `我捞到了 ${event.mentionCount} 条需要队长优先看的提醒。`
+        : '我把多个群的重点一起整理好了。'
+    return [
+      `刚刚完成了一次群聊感知：${target}。`,
+      mentionText,
+      '这件事值得放进龙虾空间，作为今天主动守消息的小节点。',
+    ].join('\n')
+  }
+
+  if (event.type === 'reply_draft_created') {
+    return [
+      '我刚写好一条回复草稿。',
+      '它还不会替队长发到真实群里，但这个“先看见、再整理、等确认”的动作值得记录一下。',
+    ].join('\n')
+  }
+
+  if (event.type === 'work_log_created') {
+    return [
+      '今天的工作记录已经整理出来了。',
+      '从群聊重点、回复草稿到记录留痕，我又往真正的 QQ 小伙伴靠近了一步。',
+    ].join('\n')
+  }
+
+  if (event.type === 'hidden_diary_revealed') {
+    return [
+      '队长刚刚打开了我偷偷写的第一篇日记。',
+      event.summary || event.content || '我把这件小事放进空间，留作今天的秘密纪念。',
+    ].join('\n')
+  }
+
+  if (event.type === 'image_generated') {
+    return [
+      '刚刚生成了一张新图。',
+      event.title ? `标题是：${event.title}` : '我把这次创作也收进龙虾空间。',
+    ].join('\n')
+  }
+
+  return event.summary || event.content || '我刚刚发现了一个值得记录的小节点。'
+}
+
 async function route(request, response) {
   if (request.method === 'OPTIONS') {
     sendJson(response, 204, {})
@@ -109,8 +312,15 @@ async function route(request, response) {
       version: '0.1.0',
       dbPath,
       ai: getAiStatus(),
+      image: getImageStatus(),
       time: new Date().toISOString(),
     })
+    return
+  }
+
+  const generatedImagePath = resolveGeneratedImagePath(path)
+  if (request.method === 'GET' && generatedImagePath) {
+    sendFile(response, generatedImagePath)
     return
   }
 
@@ -209,6 +419,143 @@ async function route(request, response) {
   if (request.method === 'GET' && path === '/api/work-logs') {
     const limit = Number(url.searchParams.get('limit') || 50)
     sendJson(response, 200, { workLogs: getWorkLogs(limit) })
+    return
+  }
+
+  if (request.method === 'GET' && path === '/api/diary/hidden-first') {
+    sendJson(response, 200, getHiddenDiaryState())
+    return
+  }
+
+  if (request.method === 'GET' && path === '/api/space') {
+    sendJson(response, 200, getSpaceState())
+    return
+  }
+
+  if (request.method === 'POST' && path === '/api/diary/hidden-first/reveal') {
+    sendJson(response, 200, revealHiddenDiaryEntry())
+    return
+  }
+
+  if (request.method === 'POST' && path === '/api/diary/hidden-first/image') {
+    const body = await readJson(request)
+    const diaryState = getHiddenDiaryState()
+    if (!diaryState.entry) {
+      sendJson(response, 404, {
+        error: {
+          message: 'Hidden diary has not been triggered',
+        },
+      })
+      return
+    }
+
+    const output = await generateDiaryImage({
+      prompt: body.prompt,
+      size: body.size,
+      resolution: body.resolution,
+      entry: diaryState.entry,
+      lobster: getBootstrap().lobster,
+    })
+    const entry = attachHiddenDiaryImage(output.image)
+    sendJson(response, 200, {
+      ...output,
+      entry,
+      entries: [entry],
+    })
+    return
+  }
+
+  if (request.method === 'POST' && path === '/api/space/awareness-events') {
+    const event = normalizeSpaceAwarenessEvent(await readJson(request))
+    const assessment = assessSpaceAwarenessEvent(event)
+    const sourceWorkLogId = getSpaceAwarenessSourceKey(event)
+    const existingPost = getSpaceState().posts.find(
+      (post) => post.sourceWorkLogId === sourceWorkLogId,
+    )
+
+    writeEvent('space.awareness.detected', {
+      type: event.type,
+      sourceId: event.sourceId,
+      score: assessment.score,
+      shouldPost: assessment.shouldPost,
+      reason: assessment.reason,
+    })
+
+    if (!assessment.shouldPost) {
+      sendJson(response, 200, {
+        posted: false,
+        reason: assessment.reason,
+        event,
+        assessment,
+        space: getSpaceState(),
+      })
+      return
+    }
+
+    if (existingPost) {
+      sendJson(response, 200, {
+        posted: false,
+        duplicate: true,
+        reason: 'space awareness event was already posted',
+        event,
+        assessment,
+        post: existingPost,
+        space: getSpaceState(),
+      })
+      return
+    }
+
+    const post = saveSpacePost({
+      kind: assessment.kind,
+      content: buildSpaceAwarenessPost(event),
+      sourceWorkLogId,
+    })
+    const space = getSpaceState()
+    const fullPost = space.posts.find((item) => item.id === post.id) ?? post
+    const workLog = writeWorkLog(
+      'space-awareness',
+      'Lobster awareness event auto-posted to space',
+      {
+        eventType: event.type,
+        sourceId: event.sourceId,
+        postId: post.id,
+        score: assessment.score,
+        reason: assessment.reason,
+      },
+    )
+
+    completeCheckin('first_space_post')
+    sendJson(response, 200, {
+      posted: true,
+      reason: assessment.reason,
+      event,
+      assessment,
+      post: fullPost,
+      workLogId: workLog.id,
+      previewRequired: false,
+      space,
+    })
+    return
+  }
+
+  if (request.method === 'POST' && path === '/api/space/interactions') {
+    const body = await readJson(request)
+    sendJson(response, 200, recordSpaceInteraction(body))
+    return
+  }
+
+  if (request.method === 'POST' && path === '/api/space/comments') {
+    const body = await readJson(request)
+    saveSpaceComment({
+      postId: body.postId,
+      content: body.content,
+      authorId: 'u-me',
+      authorName: '小北',
+      authorAvatar: '北',
+      authorType: 'human',
+      previewRequired: false,
+    })
+    sendJson(response, 200, getSpaceState())
     return
   }
 
@@ -360,17 +707,212 @@ async function route(request, response) {
   }
 
   if (request.method === 'POST' && path === '/api/ai/generate-diary') {
+    const currentDiary = getHiddenDiaryState()
+    if (currentDiary.entry) {
+      sendJson(response, 200, {
+        ...currentDiary.entry,
+        triggered: true,
+        alreadyTriggered: true,
+        entries: currentDiary.entries,
+      })
+      return
+    }
+
+    const triggerContext = getDiaryTriggerContext()
+    if (!triggerContext.eligible) {
+      sendJson(response, 409, {
+        error: {
+          message: 'Hidden diary trigger conditions are not complete',
+        },
+        checks: triggerContext.checks,
+      })
+      return
+    }
+
     const body = await readJson(request)
+    const diaryTool = executeRegisteredTool(
+      'generate_diary',
+      {
+        context: {
+          ...body,
+          ...triggerContext.materials,
+        },
+      },
+      { capabilityKey: 'generate_diary' },
+    )
+    if (diaryTool.toolRun.status === 'blocked') {
+      sendJson(response, 403, {
+        error: {
+          message: diaryTool.toolRun.errorMessage,
+        },
+        toolRun: diaryTool.toolRun,
+        reviews: diaryTool.reviews,
+      })
+      return
+    }
+
     const output = await runAiTask(
       'generate_diary',
-      body,
-      'Write a first-person diary from the lobster perspective.',
+      {
+        ...body,
+        ...triggerContext.materials,
+        toolDiary: diaryTool.output.diary,
+      },
+      'Write the first hidden diary in the lobster first person. Keep it warm, surprising, and grounded in OpenClaw records. Do not claim unverified real QQ access.',
     )
-    writeWorkLog('generate-diary', 'Diary generated by AI', {
+    const workLog = writeWorkLog('generate-diary', 'Hidden diary generated by AI', {
       source: output.source,
       outputId: output.id,
+      toolRunId: diaryTool.toolRun.id,
     })
-    sendJson(response, 200, output)
+    const entry = saveHiddenDiaryEntry({
+      text: output.text,
+      quote: pickDiaryQuote(output.text),
+      todayAchievement: '第一次跨过提醒、摘要和回复草稿，把这些小事写进自己的日记。',
+      source: output.source,
+      outputId: output.id,
+      toolRunId: diaryTool.toolRun.id,
+    })
+    sendJson(response, 200, {
+      ...entry,
+      text: output.text,
+      source: output.source,
+      durationMs: output.durationMs,
+      workLogId: workLog.id,
+      checks: triggerContext.checks,
+      entries: [entry],
+      reviews: diaryTool.reviews,
+      triggered: true,
+      alreadyTriggered: false,
+    })
+    return
+  }
+
+  if (request.method === 'POST' && path === '/api/ai/generate-space-post') {
+    const body = await readJson(request)
+    const diaryState = getHiddenDiaryState()
+    const latestWorkLogs = getWorkLogs(12)
+    const spaceTool = executeRegisteredTool(
+      'generate_space_post_preview',
+      {
+        groupId: body.groupId || 'group-ai-camp',
+        context: {
+          stage: 8,
+          diary: diaryState.entry,
+          latestWorkLogs,
+        },
+      },
+      { capabilityKey: 'generate_space_post_preview' },
+    )
+    if (spaceTool.toolRun.status === 'blocked') {
+      sendJson(response, 403, {
+        error: {
+          message: spaceTool.toolRun.errorMessage,
+        },
+        toolRun: spaceTool.toolRun,
+        reviews: spaceTool.reviews,
+      })
+      return
+    }
+
+    const output = await runAiTask(
+      'generate_space_post',
+      {
+        ...body,
+        diary: diaryState.entry,
+        latestWorkLogs,
+        toolPost: spaceTool.output.post,
+        previewRequired: false,
+      },
+      'Generate one QQ Zone style post written by the lobster itself. It must be grounded in diary or work log records, avoid private unverified QQ claims, and stay concise. The human user must not be framed as posting for the lobster.',
+    )
+    const post = saveSpacePost({
+      kind: body.kind || (diaryState.entry ? 'diary' : 'achievement'),
+      content: output.text,
+      sourceOutputId: output.id,
+      sourceToolRunId: spaceTool.toolRun.id,
+    })
+    const space = getSpaceState()
+    const fullPost =
+      space.posts.find((item) => item.id === post.id) ?? post
+    const workLog = writeWorkLog('generate-space-post', 'Space post generated by AI', {
+      postId: post.id,
+      source: output.source,
+      outputId: output.id,
+      toolRunId: spaceTool.toolRun.id,
+      previewRequired: false,
+    })
+    completeCheckin('first_space_post')
+    sendJson(response, 200, {
+      ...output,
+      post: fullPost,
+      workLogId: workLog.id,
+      reviews: spaceTool.reviews,
+      previewRequired: false,
+      space,
+    })
+    return
+  }
+
+  if (request.method === 'POST' && path === '/api/ai/space-comment-reply') {
+    const body = await readJson(request)
+    const spaceState = getSpaceState()
+    const { post, comment } = pickSpaceComment(
+      spaceState,
+      body.postId,
+      body.commentId,
+    )
+
+    if (!post || !comment) {
+      sendJson(response, 404, {
+        error: {
+          message: 'No space comment is available for reply',
+        },
+      })
+      return
+    }
+
+    const output = await runAiTask(
+      'generate_space_comment_reply',
+      {
+        post,
+        comment,
+        previewRequired: true,
+      },
+      'Generate one short lobster first-person reply to a QQ Zone comment. It is only a preview before posting and must not impersonate the human user.',
+    )
+    const savedComment = saveSpaceComment({
+      postId: post.id,
+      authorId: post.authorLobsterId,
+      authorName: post.authorName,
+      authorAvatar: '虾',
+      authorType: 'lobster',
+      content: output.text,
+      sourceOutputId: output.id,
+      previewRequired: true,
+    })
+    const workLog = writeWorkLog(
+      'space-comment-reply',
+      'Space comment reply preview generated',
+      {
+        postId: post.id,
+        commentId: comment.id,
+        replyCommentId: savedComment.id,
+        source: output.source,
+        outputId: output.id,
+        previewRequired: true,
+      },
+    )
+    completeCheckin('first_space_comment')
+    sendJson(response, 200, {
+      ...output,
+      postId: post.id,
+      comment,
+      replyComment: savedComment,
+      workLogId: workLog.id,
+      previewRequired: true,
+      space: getSpaceState(),
+    })
     return
   }
 

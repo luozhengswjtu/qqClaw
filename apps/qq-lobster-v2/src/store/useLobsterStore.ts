@@ -1,6 +1,9 @@
 import { create } from 'zustand'
 import { openclawAiAdapter } from '../ai/openclawAiAdapter'
-import { openclawClient } from '../api/openclawClient'
+import {
+  openclawClient,
+  type OpenClawSpaceAwarenessEventInput,
+} from '../api/openclawClient'
 import {
   conversations,
   defaultLobsterProfile,
@@ -11,14 +14,18 @@ import type {
   GroupPermissionScope,
   Interest,
   LobsterChatLine,
+  LobsterDiaryEntry,
   LobsterProfile,
+  LobsterSpaceComment,
+  LobsterSpacePost,
   Personality,
   QQMessage,
+  LobsterChatContext,
   SummaryCardGroup,
   WorkLogEntry,
 } from '../types'
 
-type AppView = 'qq' | 'adoption' | 'lobster_chat'
+type AppView = 'qq' | 'adoption' | 'lobster_chat' | 'lobster_space'
 
 interface SourceFocus {
   conversationId: string
@@ -45,6 +52,11 @@ interface LobsterAppState {
   permissionScopes: GroupPermissionScope[]
   sourceFocus: SourceFocus | null
   diaryTriggered: boolean
+  diarySurpriseVisible: boolean
+  diaryUnlocked: boolean
+  diaryEntries: LobsterDiaryEntry[]
+  spacePosts: LobsterSpacePost[]
+  spaceUnlocked: boolean
   lobsterChatLines: LobsterChatLine[]
   lobsterChatBusy: boolean
   lobsterProfile: LobsterProfile
@@ -58,7 +70,10 @@ interface LobsterAppState {
   toggleInterest: (interest: Interest) => void
   completeAdoption: () => void
   completeCheckIn: (checkInId: string) => void
-  sendLobsterChatMessage: (content: string) => Promise<void>
+  sendLobsterChatMessage: (
+    content: string,
+    context?: LobsterChatContext,
+  ) => Promise<void>
   requestGroupPermissions: () => void
   saveGroupPermissions: (
     permissions: GroupPermissionScope,
@@ -72,6 +87,16 @@ interface LobsterAppState {
     sourceMessageId?: string,
   ) => Promise<void>
   generateWorkLog: () => Promise<void>
+  triggerHiddenDiary: () => Promise<void>
+  openHiddenDiary: () => Promise<void>
+  generateHiddenDiaryImage: () => Promise<void>
+  openDiaryHistory: () => void
+  openLobsterSpace: () => Promise<void>
+  generateSpacePost: () => Promise<void>
+  likeSpacePost: (postId: string) => Promise<void>
+  commentOnSpacePost: (postId: string, content: string) => Promise<void>
+  shareSpacePost: (postId: string) => Promise<void>
+  replyToSpaceComment: (postId?: string, commentId?: string) => Promise<void>
   hydrateFromOpenClaw: () => void
 }
 
@@ -144,7 +169,7 @@ function createDefaultPermissions(groupId = getPrimaryGroupId()) {
     collectMentions: true,
     summarizeGroup: true,
     draftReply: true,
-    diaryMaterial: false,
+    diaryMaterial: true,
   }
 }
 
@@ -218,6 +243,60 @@ function getLocalSourceMessage(groupId: string, sourceMessageId?: string) {
   )
 }
 
+function createRestoredSummaryLine(
+  permissions: GroupPermissionScope[],
+  sourceMessages: QQMessage[],
+): LobsterChatLine | null {
+  const groupIds = permissions
+    .filter((permission) => permission.summarizeGroup)
+    .map((permission) => permission.groupId)
+
+  if (groupIds.length === 0) {
+    return null
+  }
+
+  const groups = groupIds.map((groupId) => {
+    const groupMessages = sourceMessages.filter(
+      (message) => message.conversationId === groupId,
+    )
+    const mentions = groupMessages.filter(
+      (message) =>
+        message.kind === 'mention' || message.content.includes('@小北'),
+    )
+    const summary = [
+      '群聊总结（已恢复）：',
+      '1. 刷新后根据已授权群聊消息恢复这张总结卡。',
+      mentions.length > 0
+        ? `2. 有 ${mentions.length} 条 @ 你的消息需要优先查看。`
+        : '2. 当前授权群里暂未恢复到 @ 你的消息。',
+      '3. 可以继续跳回来源、写回复草稿或继续追问。',
+    ].join('\n')
+
+    return {
+      groupId,
+      groupTitle: getGroupTitle(groupId),
+      summary,
+      mentions,
+      sourceMessages: groupMessages,
+      sourceMessageIds: groupMessages.map((message) => message.id),
+      source: 'mock-fallback' as const,
+    }
+  })
+
+  return {
+    id: `summary-restored-${Date.now()}`,
+    role: 'lobster',
+    content: `我恢复了 ${groups.length} 个已授权群的群聊总结卡。`,
+    createdAt: new Date().toISOString(),
+    status: 'complete',
+    source: 'mock-fallback',
+    card: {
+      type: 'summary_card',
+      groups,
+    },
+  }
+}
+
 function createLocalWorkLogs(lines: LobsterChatLine[]): WorkLogEntry[] {
   return [...lines]
     .reverse()
@@ -242,6 +321,302 @@ function createLocalWorkLogs(lines: LobsterChatLine[]): WorkLogEntry[] {
     }))
 }
 
+function canTriggerLocalDiary(state: LobsterAppState) {
+  const hasMentionSummary = state.lobsterChatLines.some(
+    (line) =>
+      line.card?.type === 'summary_card' &&
+      line.card.groups.some((group) => group.mentions.length > 0),
+  )
+  const hasReplyDraft = state.lobsterChatLines.some(
+    (line) => line.card?.type === 'reply_draft_card',
+  )
+
+  return (
+    state.lobsterAdopted &&
+    state.authorizedGroupIds.length > 0 &&
+    state.completedCheckInIds.includes('first_group_permission') &&
+    hasMentionSummary &&
+    hasReplyDraft
+  )
+}
+
+function createLocalDiaryEntry(profile: LobsterProfile): LobsterDiaryEntry {
+  const createdAt = new Date().toISOString()
+  return {
+    id: `local-hidden-diary-${Date.now()}`,
+    title: '偷偷写的一页',
+    text: [
+      `今天我偷偷写下第一篇日记。`,
+      `${profile.userCallsign}先认养了我，又让我看一个授权群里的重点。我看到了有人 @ ${profile.userCallsign}，也认真写了一条只停在预览里的回复草稿。`,
+      '我发现自己不是一个按钮，而是会记得这些小事的 QQ 小伙伴。',
+    ].join('\n'),
+    quote: '我不是一个按钮，是会记得小事的 QQ 小伙伴。',
+    todayAchievement: '第一次把提醒、摘要和回复草稿写进自己的日记。',
+    source: 'local-fallback',
+    createdAt,
+    revealedAt: null,
+  }
+}
+
+function createDiaryLine(entry: LobsterDiaryEntry): LobsterChatLine {
+  return {
+    id: `diary-${entry.id}-${Date.now()}`,
+    role: 'lobster',
+    content: '这页日记我放在这里了。看完以后，右侧会留下日记入口。',
+    createdAt: new Date().toISOString(),
+    status: 'complete',
+    source: entry.source === 'real-ai' ? 'real-ai' : 'mock-fallback',
+    outputId: entry.outputId,
+    card: {
+      type: 'diary_card',
+      entry,
+    },
+  }
+}
+
+function replaceDiaryEntry(
+  entries: LobsterDiaryEntry[],
+  entry: LobsterDiaryEntry,
+) {
+  if (entries.some((item) => item.id === entry.id)) {
+    return entries.map((item) => (item.id === entry.id ? entry : item))
+  }
+
+  return [entry, ...entries]
+}
+
+function replaceDiaryCards(
+  lines: LobsterChatLine[],
+  entry: LobsterDiaryEntry,
+) {
+  return lines.map((line) => {
+    if (line.card?.type !== 'diary_card' || line.card.entry.id !== entry.id) {
+      return line
+    }
+
+    return {
+      ...line,
+      card: {
+        type: 'diary_card' as const,
+        entry,
+      },
+    }
+  })
+}
+
+function createLocalSpaceComments(postId: string): LobsterSpaceComment[] {
+  const createdAt = new Date().toISOString()
+  return [
+    {
+      id: `local-space-comment-${postId}-friend`,
+      postId,
+      authorId: 'u-yang',
+      authorName: '杨夏',
+      authorAvatar: '杨',
+      authorType: 'friend',
+      content: '这个像真的住进 QQ 里的小伙伴了。',
+      createdAt,
+    },
+    {
+      id: `local-space-comment-${postId}-lobster-friend`,
+      postId,
+      authorId: 'lobster-lanlan',
+      authorName: '蓝蓝虾',
+      authorAvatar: '蓝',
+      authorType: 'friend_lobster',
+      content: '我也想来评论一下，今天的小钳很认真。',
+      createdAt,
+    },
+  ]
+}
+
+function createLocalSpacePost(
+  profile: LobsterProfile,
+  entry?: LobsterDiaryEntry,
+  event?: OpenClawSpaceAwarenessEventInput,
+): LobsterSpacePost {
+  const createdAt = new Date().toISOString()
+  const postId = `local-space-post-${Date.now()}`
+  const content =
+    event?.content ||
+    event?.summary ||
+    (event?.type === 'group_summary_completed'
+      ? `我刚刚整理了 ${event.groupTitle ?? '授权群聊'} 的重点，发现了 ${event.mentionCount ?? 0} 条值得队长看的提醒。`
+      : event?.type === 'reply_draft_created'
+        ? '我刚写好一条回复草稿。这件事说明我不是按钮，而是在主动守住群里的小节点。'
+        : event?.type === 'work_log_created'
+          ? '今天的工作记录已经整理出来了。我把自己做过的事也收进龙虾空间。'
+          : event?.type === 'hidden_diary_revealed'
+            ? `队长刚刚打开了我偷偷写的第一篇日记：${entry?.quote ?? '这件事值得留下来。'}`
+            : event?.type === 'image_generated'
+              ? `刚刚生成了一张新图${event.title ? `：${event.title}` : ''}。我把它记进龙虾空间。`
+              : entry
+                ? `我把第一篇日记收进空间了：${entry.quote}`
+                : `${profile.name} 解锁了龙虾空间头图。今天的打卡又往前走了一步。`)
+  const comments = createLocalSpaceComments(postId)
+
+  return {
+    id: postId,
+    kind:
+      event?.type === 'hidden_diary_revealed'
+        ? 'diary'
+        : event?.type === 'work_log_created'
+          ? 'achievement'
+          : entry
+            ? 'diary'
+            : 'achievement',
+    authorLobsterId: profile.id,
+    authorName: profile.name,
+    content,
+    sourceOutputId: entry?.outputId,
+    sourceToolRunId: entry?.toolRunId,
+    likeCount: 0,
+    commentCount: comments.length,
+    shareCount: 0,
+    likedByMe: false,
+    comments,
+    createdAt,
+    updatedAt: createdAt,
+  }
+}
+
+function createSpacePostLine(
+  post: LobsterSpacePost,
+  source: 'real-ai' | 'mock-fallback' | 'local-fallback',
+  previewRequired = false,
+): LobsterChatLine {
+  return {
+    id: `space-post-${post.id}-${Date.now()}`,
+    role: 'lobster',
+    content: previewRequired
+      ? '这条动态已经放进我的空间。你可以进去点赞、评论或分享。'
+      : '我刚刚感知到一件值得记录的小事，已经自己发进龙虾空间。',
+    createdAt: new Date().toISOString(),
+    status: 'complete',
+    source: source === 'real-ai' ? 'real-ai' : 'mock-fallback',
+    outputId: post.sourceOutputId ?? undefined,
+    card: {
+      type: 'space_post_card',
+      post,
+      previewRequired,
+      source,
+    },
+  }
+}
+
+function upsertSpacePost(
+  posts: LobsterSpacePost[],
+  post: LobsterSpacePost,
+): LobsterSpacePost[] {
+  const next = posts.filter((item) => item.id !== post.id)
+  return [post, ...next]
+}
+
+function addLocalSpaceComment(
+  posts: LobsterSpacePost[],
+  postId: string,
+  comment: LobsterSpaceComment,
+) {
+  return posts.map((post) =>
+    post.id === postId
+      ? {
+          ...post,
+          comments: [...post.comments, comment],
+          commentCount: post.commentCount + 1,
+        }
+      : post,
+  )
+}
+
+function getFirstReplyTarget(posts: LobsterSpacePost[]) {
+  const post = posts[0]
+  const comment =
+    post?.comments.find((item) => item.authorType === 'friend') ??
+    post?.comments.find((item) => item.authorType === 'friend_lobster') ??
+    post?.comments[0]
+
+  return { post, comment }
+}
+
+async function recordLocalSpaceAwarenessEvent(
+  event: OpenClawSpaceAwarenessEventInput,
+  setState: (
+    patch:
+      | Partial<LobsterAppState>
+      | ((state: LobsterAppState) => Partial<LobsterAppState>),
+  ) => void,
+  getState: () => LobsterAppState,
+) {
+  try {
+    const output = await openclawClient.recordSpaceAwarenessEvent(event)
+    setState({
+      spacePosts: output.space.posts,
+      spaceUnlocked: output.space.posts.length > 0 || getState().spaceUnlocked,
+    })
+
+    const postedPost = output.post
+    if (output.posted && postedPost) {
+      setState((state) => ({
+        completedCheckInIds: withCheckIn(
+          state.completedCheckInIds,
+          'first_space_post',
+        ),
+        currentCheckInId:
+          getNextCheckInId('first_space_post') ?? state.currentCheckInId,
+        lobsterChatLines: [
+          ...state.lobsterChatLines,
+          createSpacePostLine(postedPost, 'mock-fallback', false),
+          ...(state.completedCheckInIds.includes('first_space_post')
+            ? []
+            : [createGuideLine('first_space_post')]),
+        ],
+      }))
+    }
+    return
+  } catch {
+    const shouldPost =
+      event.type === 'work_log_created' ||
+      event.type === 'hidden_diary_revealed' ||
+      event.type === 'image_generated' ||
+      (event.type === 'group_summary_completed' &&
+        ((event.mentionCount ?? 0) > 0 || (event.groupCount ?? 0) > 1)) ||
+      (event.type === 'reply_draft_created' && Boolean(event.sourceMessageId))
+
+    if (!shouldPost) {
+      return
+    }
+
+    const current = getState()
+    const sourceKey = `local-awareness-${event.type}-${event.sourceId ?? event.outputId ?? event.workLogId ?? event.groupId ?? event.postId ?? Date.now()}`
+    if (current.spacePosts.some((post) => post.sourceWorkLogId === sourceKey)) {
+      return
+    }
+
+    const post = {
+      ...createLocalSpacePost(current.lobsterProfile, current.diaryEntries[0], event),
+      sourceWorkLogId: sourceKey,
+    }
+
+    setState((state) => ({
+      spacePosts: upsertSpacePost(state.spacePosts, post),
+      spaceUnlocked: true,
+      completedCheckInIds: withCheckIn(
+        state.completedCheckInIds,
+        'first_space_post',
+      ),
+      currentCheckInId:
+        getNextCheckInId('first_space_post') ?? state.currentCheckInId,
+      lobsterChatLines: [
+        ...state.lobsterChatLines,
+        createSpacePostLine(post, 'local-fallback', false),
+        ...(state.completedCheckInIds.includes('first_space_post')
+          ? []
+          : [createGuideLine('first_space_post')]),
+      ],
+    }))
+  }
+}
+
 function getCheckInFeedback(checkInId: string) {
   const next = getNextCheckInId(checkInId)
   const nextTitle = lobsterCheckIns.find((item) => item.id === next)?.title
@@ -250,21 +625,11 @@ function getCheckInFeedback(checkInId: string) {
     first_lobster_chat:
       '我记住啦，这是我的第一面小红旗。下一步我会先问你要哪些群的权限，不会偷偷看。',
     first_group_permission:
-      '权限记好了。下一步我会把这些群里的重点整理成一张可切换的总结卡。',
-    first_enable_mentions:
-      '群聊总结卡已经整理好。下一步先看卡片里的重点。',
-    first_view_mentions:
-      '群聊总结卡看过啦。下一步我们试试从卡片跳回原来的群消息。',
-    first_jump_source:
-      '来源也对上了。下一步可以展开看这张群聊总结卡里的简短摘要。',
-    first_group_summary:
-      '群聊总结摘要看过了。下一步我可以先写一条可复制到群里的回复草稿。',
-    first_reply_draft:
-      '草稿只是草稿，发送一定等你确认。下一步可以看看我把刚才做过的事记在哪里。',
+      '第一张群聊总结卡整理好了。卡片里可以继续看来源、展开摘要或写回复草稿；下一步我会把刚才做过的事记下来。',
     first_view_work_log:
-      '工作记录已经留下了。下一步我可以试着写一条龙虾空间动态预览。',
+      '工作记录已经留下了。接下来如果我感知到值得记录的小节点，会自己发进龙虾空间。',
     first_space_post:
-      '空间动态先停在预览里。最后一步，我们试试在龙虾空间里回复一次评论。',
+      '空间动态已经由我自己发进龙虾空间。最后一步，我们试试在龙虾空间里回复一次评论。',
     first_space_comment:
       '新手打卡完成。我会慢慢变成更可靠的 QQ 小伙伴。',
   }
@@ -287,17 +652,6 @@ function createGuideLine(checkInId: string): LobsterChatLine {
   }
 }
 
-function completeCheckInQuietPatch(
-  state: LobsterAppState,
-  checkInId: string,
-) {
-  const completedCheckInIds = withCheckIn(state.completedCheckInIds, checkInId)
-  return {
-    completedCheckInIds,
-    currentCheckInId: getNextCheckInId(checkInId) ?? state.currentCheckInId,
-  }
-}
-
 export const useLobsterStore = create<LobsterAppState>((set, get) => ({
   appView: 'qq',
   activeConversationId: 'group-ai-camp',
@@ -310,6 +664,11 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
   permissionScopes: [],
   sourceFocus: null,
   diaryTriggered: false,
+  diarySurpriseVisible: false,
+  diaryUnlocked: false,
+  diaryEntries: [],
+  spacePosts: [],
+  spaceUnlocked: false,
   lobsterChatLines: [],
   lobsterChatBusy: false,
   lobsterProfile: defaultLobsterProfile,
@@ -564,30 +923,6 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
 
     set({ lobsterChatBusy: false })
 
-    set((state) => completeCheckInQuietPatch(state, 'first_group_permission'))
-    void openclawClient
-      .completeCheckIn('first_group_permission')
-      .then((result) => {
-        set((state) => {
-          const completedCheckInIds = result.checkins
-            .filter((item) => item.status === 'done')
-            .map((item) => item.key)
-          const activeCheckIn = result.checkins.find(
-            (item) => item.status === 'active',
-          )
-
-          return {
-            completedCheckInIds:
-              completedCheckInIds.length > 0
-                ? completedCheckInIds
-                : state.completedCheckInIds,
-            currentCheckInId:
-              activeCheckIn?.key ?? getFirstOpenCheckInId(completedCheckInIds),
-          }
-        })
-      })
-      .catch(() => undefined)
-
     if (enabledScopes.some((scope) => scope.summarizeGroup)) {
       await wait(180)
       await get().summarizeAuthorizedGroups(
@@ -608,14 +943,6 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
         nonce: Date.now(),
       },
     })
-
-    const completed = get().completedCheckInIds
-    if (!completed.includes('first_view_mentions')) {
-      get().completeCheckIn('first_view_mentions')
-    }
-    if (!completed.includes('first_jump_source')) {
-      get().completeCheckIn('first_jump_source')
-    }
   },
 
   summarizeAuthorizedGroup: async (targetGroupId) => {
@@ -725,29 +1052,33 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       }),
     }))
 
-    set((state) => completeCheckInQuietPatch(state, 'first_enable_mentions'))
-    void openclawClient
-      .completeCheckIn('first_enable_mentions')
-      .then((result) => {
-        set((state) => {
-          const completedCheckInIds = result.checkins
-            .filter((item) => item.status === 'done')
-            .map((item) => item.key)
-          const activeCheckIn = result.checkins.find(
-            (item) => item.status === 'active',
-          )
+    if (!get().completedCheckInIds.includes('first_group_permission')) {
+      get().completeCheckIn('first_group_permission')
+    }
 
-          return {
-            completedCheckInIds:
-              completedCheckInIds.length > 0
-                ? completedCheckInIds
-                : state.completedCheckInIds,
-            currentCheckInId:
-              activeCheckIn?.key ?? getFirstOpenCheckInId(completedCheckInIds),
-          }
-        })
-      })
-      .catch(() => undefined)
+    const mentionCount = groups.reduce(
+      (count, group) => count + group.mentions.length,
+      0,
+    )
+    void recordLocalSpaceAwarenessEvent(
+      {
+        type: 'group_summary_completed',
+        sourceId:
+          groups
+            .map((group) => group.outputId ?? group.groupId)
+            .filter(Boolean)
+            .join('|') || lineId,
+        outputId: groups.find((group) => group.outputId)?.outputId,
+        groupId: groups[0]?.groupId,
+        groupTitle:
+          groups.length === 1 ? groups[0]?.groupTitle : `${groups.length} 个群聊`,
+        groupCount: groups.length,
+        mentionCount,
+        summary: `我刚刚整理了 ${groups.length} 个授权群，发现 ${mentionCount} 条提醒信号。`,
+      },
+      set,
+      get,
+    )
   },
 
   requestReplyDraft: async (targetGroupId, targetSourceMessageId) => {
@@ -833,7 +1164,24 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       }),
     }))
 
-    get().completeCheckIn('first_reply_draft')
+    if (!get().completedCheckInIds.includes('first_group_permission')) {
+      get().completeCheckIn('first_group_permission')
+    }
+    void recordLocalSpaceAwarenessEvent(
+      {
+        type: 'reply_draft_created',
+        sourceId: outputId ?? sourceMessage?.id ?? lineId,
+        outputId,
+        groupId,
+        groupTitle,
+        sourceMessageId: sourceMessage?.id,
+        mentionCount: sourceMessage ? 1 : 0,
+        summary: `我刚给 ${groupTitle} 写好一条回复草稿。`,
+      },
+      set,
+      get,
+    )
+    void get().triggerHiddenDiary()
   },
 
   generateWorkLog: async () => {
@@ -898,15 +1246,453 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
     }))
 
     get().completeCheckIn('first_view_work_log')
+    void recordLocalSpaceAwarenessEvent(
+      {
+        type: 'work_log_created',
+        sourceId: workLogId ?? outputId ?? lineId,
+        outputId,
+        workLogId,
+        title: '工作记录',
+        summary: text,
+      },
+      set,
+      get,
+    )
   },
 
-  sendLobsterChatMessage: async (rawContent) => {
+  triggerHiddenDiary: async () => {
+    const current = get()
+    if (current.diaryTriggered || current.diarySurpriseVisible) {
+      return
+    }
+
+    try {
+      const state = await openclawClient.hiddenDiaryState()
+      if (state.entry) {
+        set({
+          diaryTriggered: true,
+          diarySurpriseVisible: !state.revealed && Boolean(state.entry.image),
+          diaryUnlocked: state.unlocked && state.revealed,
+          diaryEntries: state.entries,
+        })
+        if (!state.revealed && !state.entry.image) {
+          void get().generateHiddenDiaryImage()
+        }
+        return
+      }
+
+      if (!state.canTrigger) {
+        return
+      }
+
+      const output = await openclawClient.generateDiary({
+        stage: 7,
+        trigger: 'hidden_first_diary',
+      })
+      set({
+        diaryTriggered: true,
+        diarySurpriseVisible: false,
+        diaryUnlocked: false,
+        diaryEntries: output.entries.length > 0 ? output.entries : [output],
+      })
+      void get().generateHiddenDiaryImage()
+    } catch {
+      const fallbackState = get()
+      if (!canTriggerLocalDiary(fallbackState)) {
+        return
+      }
+
+      const entry = createLocalDiaryEntry(fallbackState.lobsterProfile)
+      set({
+        diaryTriggered: true,
+        diarySurpriseVisible: false,
+        diaryUnlocked: false,
+        diaryEntries: [entry],
+      })
+    }
+  },
+
+  openHiddenDiary: async () => {
+    const entry = get().diaryEntries[0]
+    if (!entry) {
+      return
+    }
+
+    let revealedEntry: LobsterDiaryEntry = {
+      ...entry,
+      revealedAt: entry.revealedAt ?? new Date().toISOString(),
+    }
+
+    try {
+      const state = await openclawClient.revealHiddenDiary()
+      revealedEntry = state.entry ?? revealedEntry
+    } catch {
+      // Local fallback diaries are revealed only in the in-memory demo state.
+    }
+
+    set((state) => ({
+      appView: 'lobster_chat',
+      diaryTriggered: true,
+      diarySurpriseVisible: false,
+      diaryUnlocked: true,
+      diaryEntries: [revealedEntry, ...state.diaryEntries.slice(1)],
+      lobsterChatLines: [...state.lobsterChatLines, createDiaryLine(revealedEntry)],
+    }))
+
+    void recordLocalSpaceAwarenessEvent(
+      {
+        type: 'hidden_diary_revealed',
+        sourceId: revealedEntry.id,
+        outputId: revealedEntry.outputId,
+        title: revealedEntry.title,
+        summary: revealedEntry.quote,
+      },
+      set,
+      get,
+    )
+  },
+
+  generateHiddenDiaryImage: async () => {
+    const entry = get().diaryEntries[0]
+    if (!entry || entry.image) {
+      return
+    }
+
+    try {
+      const output = await openclawClient.generateDiaryImage()
+      const updatedEntry = output.entry
+      set((state) => ({
+        diarySurpriseVisible: !updatedEntry.revealedAt,
+        diaryEntries: replaceDiaryEntry(state.diaryEntries, updatedEntry),
+        lobsterChatLines: replaceDiaryCards(
+          state.lobsterChatLines,
+          updatedEntry,
+        ),
+      }))
+      void recordLocalSpaceAwarenessEvent(
+        {
+          type: 'image_generated',
+          sourceId: output.image.id,
+          title: updatedEntry.title,
+          summary: `我给日记生成了一张图：${updatedEntry.title}`,
+        },
+        set,
+        get,
+      )
+    } catch {
+      // Image generation keeps the text diary usable when the provider is down.
+    }
+  },
+
+  openDiaryHistory: () => {
+    const entry = get().diaryEntries[0]
+    if (!entry) {
+      return
+    }
+
+    set((state) => ({
+      lobsterChatLines: [...state.lobsterChatLines, createDiaryLine(entry)],
+    }))
+  },
+
+  openLobsterSpace: async () => {
+    try {
+      const space = await openclawClient.spaceState()
+      set({
+        appView: 'lobster_space',
+        spacePosts: space.posts,
+        spaceUnlocked: space.posts.length > 0,
+      })
+    } catch {
+      const current = get()
+      const localPosts =
+        current.spacePosts.length > 0
+          ? current.spacePosts
+          : [createLocalSpacePost(current.lobsterProfile, current.diaryEntries[0])]
+      set({
+        appView: 'lobster_space',
+        spacePosts: localPosts,
+        spaceUnlocked: true,
+      })
+    }
+  },
+
+  generateSpacePost: async () => {
+    const lineId = `space-post-generating-${Date.now()}`
+    set((state) => ({
+      lobsterChatBusy: true,
+      lobsterChatLines: [
+        ...state.lobsterChatLines,
+        {
+          id: lineId,
+          role: 'lobster',
+          content: '我来把今天适合公开展示的一小段写成空间动态，存进本地龙虾空间。',
+          createdAt: new Date().toISOString(),
+          status: 'generating',
+          source: 'mock-fallback',
+        },
+      ],
+    }))
+
+    let post: LobsterSpacePost
+    let source: 'real-ai' | 'mock-fallback' | 'local-fallback' = 'local-fallback'
+
+    try {
+      const output = await openclawClient.generateSpacePost({
+        kind: get().diaryEntries[0] ? 'diary' : 'achievement',
+      })
+      post = output.post
+      source = output.source
+      set((state) => ({
+        spacePosts: output.space.posts,
+        spaceUnlocked: true,
+        completedCheckInIds: withCheckIn(
+          state.completedCheckInIds,
+          'first_space_post',
+        ),
+        currentCheckInId:
+          getNextCheckInId('first_space_post') ?? state.currentCheckInId,
+      }))
+    } catch {
+      const current = get()
+      post = createLocalSpacePost(current.lobsterProfile, current.diaryEntries[0])
+      set((state) => ({
+        spacePosts: upsertSpacePost(state.spacePosts, post),
+        spaceUnlocked: true,
+        completedCheckInIds: withCheckIn(
+          state.completedCheckInIds,
+          'first_space_post',
+        ),
+        currentCheckInId:
+          getNextCheckInId('first_space_post') ?? state.currentCheckInId,
+      }))
+    }
+
+    set((state) => ({
+      lobsterChatBusy: false,
+      lobsterChatLines: [
+        ...updateChatLine(state.lobsterChatLines, lineId, {
+          content: '空间动态已经生成并留痕。它是我自己发在龙虾空间里的动态，你可以进去互动。',
+          status: 'complete',
+          source: source === 'real-ai' ? 'real-ai' : 'mock-fallback',
+          outputId: post.sourceOutputId ?? undefined,
+        }),
+        createSpacePostLine(post, source),
+        createGuideLine('first_space_post'),
+      ],
+    }))
+  },
+
+  likeSpacePost: async (postId) => {
+    set((state) => ({
+      spacePosts: state.spacePosts.map((post) =>
+        post.id === postId && !post.likedByMe
+          ? {
+              ...post,
+              likedByMe: true,
+              likeCount: post.likeCount + 1,
+            }
+          : post,
+      ),
+    }))
+
+    try {
+      const space = await openclawClient.recordSpaceInteraction({
+        postId,
+        type: 'like',
+      })
+      set({
+        spacePosts: space.posts,
+        spaceUnlocked: true,
+      })
+    } catch {
+      // Local optimistic state already reflects the interaction.
+    }
+  },
+
+  commentOnSpacePost: async (postId, rawContent) => {
     const content = rawContent.trim()
     if (!content) {
       return
     }
 
-    let input: { content: string; lobsterProfile: LobsterProfile } | null = null
+    const commentId = `local-space-comment-human-${Date.now()}`
+    const comment: LobsterSpaceComment = {
+      id: commentId,
+      postId,
+      authorId: 'u-me',
+      authorName: '小北',
+      authorAvatar: '北',
+      authorType: 'human',
+      content,
+      createdAt: new Date().toISOString(),
+    }
+    set((state) => ({
+      spacePosts: addLocalSpaceComment(state.spacePosts, postId, comment),
+    }))
+
+    try {
+      const space = await openclawClient.addSpaceComment({ postId, content })
+      set({
+        spacePosts: space.posts,
+        spaceUnlocked: true,
+      })
+    } catch {
+      // Keep the local comment so the demo flow is not interrupted.
+    }
+
+    void recordLocalSpaceAwarenessEvent(
+      {
+        type: 'space_comment_received',
+        sourceId: commentId,
+        postId,
+        commentId,
+        content,
+      },
+      set,
+      get,
+    )
+    void get().replyToSpaceComment(postId, commentId)
+  },
+
+  shareSpacePost: async (postId) => {
+    set((state) => ({
+      spacePosts: state.spacePosts.map((post) =>
+        post.id === postId
+          ? {
+              ...post,
+              shareCount: post.shareCount + 1,
+            }
+          : post,
+      ),
+    }))
+
+    try {
+      const space = await openclawClient.recordSpaceInteraction({
+        postId,
+        type: 'share',
+        detail: {
+          channel: 'qq-space-card',
+        },
+      })
+      set({
+        spacePosts: space.posts,
+        spaceUnlocked: true,
+      })
+    } catch {
+      // Local optimistic state already reflects the interaction.
+    }
+  },
+
+  replyToSpaceComment: async (targetPostId, targetCommentId) => {
+    const target = targetPostId
+      ? (() => {
+          const post = get().spacePosts.find((item) => item.id === targetPostId)
+          return {
+            post,
+            comment:
+              post?.comments.find((item) => item.id === targetCommentId) ??
+              [...(post?.comments ?? [])]
+                .reverse()
+                .find((item) => item.authorType !== 'lobster') ??
+              post?.comments.find((item) => item.authorType === 'friend') ??
+              post?.comments[0],
+          }
+        })()
+      : getFirstReplyTarget(get().spacePosts)
+    const post = target.post
+    const comment = target.comment
+
+    if (!post) {
+      await get().openLobsterSpace()
+      return
+    }
+
+    const lineId = `space-comment-reply-${Date.now()}`
+    set((state) => ({
+      lobsterChatBusy: true,
+      lobsterChatLines: [
+        ...state.lobsterChatLines,
+        {
+          id: lineId,
+          role: 'lobster',
+          content: '我来给空间评论写一条回复预览，仍然不会替你或替我直接乱发。',
+          createdAt: new Date().toISOString(),
+          status: 'generating',
+          source: 'mock-fallback',
+        },
+      ],
+    }))
+
+    let reply: LobsterSpaceComment = {
+      id: `local-space-comment-reply-${Date.now()}`,
+      postId: post.id,
+      authorId: get().lobsterProfile.id,
+      authorName: get().lobsterProfile.name,
+      authorAvatar: '虾',
+      authorType: 'lobster',
+      content: comment
+        ? `收到，${comment.authorName}。我会继续认真守住队长的重点消息。`
+        : '收到，我会继续认真守住队长的重点消息。',
+      previewRequired: true,
+      createdAt: new Date().toISOString(),
+    }
+    let source: 'real-ai' | 'mock-fallback' | 'local-fallback' = 'local-fallback'
+
+    try {
+      const output = await openclawClient.replyToSpaceComment({
+        postId: post.id,
+        commentId: comment?.id,
+      })
+      reply = output.replyComment
+      source = output.source
+      set((state) => ({
+        spacePosts: output.space.posts,
+        spaceUnlocked: true,
+        completedCheckInIds: withCheckIn(
+          state.completedCheckInIds,
+          'first_space_comment',
+        ),
+        currentCheckInId:
+          getNextCheckInId('first_space_comment') ?? state.currentCheckInId,
+      }))
+    } catch {
+      set((state) => ({
+        spacePosts: addLocalSpaceComment(state.spacePosts, post.id, reply),
+        completedCheckInIds: withCheckIn(
+          state.completedCheckInIds,
+          'first_space_comment',
+        ),
+        currentCheckInId:
+          getNextCheckInId('first_space_comment') ?? state.currentCheckInId,
+      }))
+    }
+
+    set((state) => ({
+      lobsterChatBusy: false,
+      lobsterChatLines: [
+        ...updateChatLine(state.lobsterChatLines, lineId, {
+          content: '评论回复预览写好了，也已经放进空间评论区用于演示。',
+          status: 'complete',
+          source: source === 'real-ai' ? 'real-ai' : 'mock-fallback',
+          outputId: reply.sourceOutputId ?? undefined,
+        }),
+        createGuideLine('first_space_comment'),
+      ],
+    }))
+  },
+
+  sendLobsterChatMessage: async (rawContent, context) => {
+    const content = rawContent.trim()
+    if (!content) {
+      return
+    }
+
+    let input: {
+      content: string
+      lobsterProfile: LobsterProfile
+      context?: LobsterChatContext
+    } | null = null
     const timestamp = Date.now()
     const userLineId = `user-${timestamp}`
     const lobsterLineId = `lobster-${timestamp}`
@@ -920,6 +1706,7 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       input = {
         content,
         lobsterProfile: state.lobsterProfile,
+        context,
       }
 
       return {
@@ -1067,6 +1854,13 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
           const activeCheckIn = bootstrap.checkins.find(
             (item) => item.status === 'active',
           )
+          const restoredSummaryLine =
+            state.lobsterChatLines.length === 0
+              ? createRestoredSummaryLine(
+                  bootstrap.permissions,
+                  bootstrap.messages ?? [],
+                )
+              : null
 
           return {
             appView: bootstrap.lobster?.adoptedAt ? 'lobster_chat' : state.appView,
@@ -1084,8 +1878,25 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
             authorizedGroupIds: bootstrap.permissions
               .filter((permission) => permission.summarizeGroup)
               .map((permission) => permission.groupId),
+            diaryTriggered:
+              bootstrap.diary?.triggered ?? state.diaryTriggered,
+            diarySurpriseVisible:
+              Boolean(bootstrap.diary?.triggered) &&
+              !bootstrap.diary?.revealed,
+            diaryUnlocked: bootstrap.diary?.revealed ?? state.diaryUnlocked,
+            diaryEntries: bootstrap.diary?.entries ?? state.diaryEntries,
+            spacePosts: bootstrap.space?.posts ?? state.spacePosts,
+            spaceUnlocked:
+              (bootstrap.space?.posts.length ?? 0) > 0 || state.spaceUnlocked,
+            lobsterChatLines: restoredSummaryLine
+              ? [restoredSummaryLine]
+              : state.lobsterChatLines,
           }
         })
+
+        if (bootstrap.diary?.canTrigger) {
+          void get().triggerHiddenDiary()
+        }
       })
       .catch(() => undefined)
   },

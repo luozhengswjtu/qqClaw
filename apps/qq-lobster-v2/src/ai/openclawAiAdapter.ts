@@ -1,5 +1,5 @@
 import { openclawClient } from '../api/openclawClient'
-import type { LobsterProfile } from '../types'
+import type { LobsterChatContext, LobsterProfile } from '../types'
 import { mockAiAdapter, type AdoptionInput } from './mockAiAdapter'
 
 export const openclawAiAdapter = {
@@ -35,6 +35,7 @@ export const openclawAiAdapter = {
   async chatWithLobster(input: {
     content: string
     lobsterProfile: LobsterProfile
+    context?: LobsterChatContext
   }) {
     try {
       return await openclawClient.chat([
@@ -42,7 +43,7 @@ export const openclawAiAdapter = {
           role: 'user',
           content: `Lobster profile: ${JSON.stringify(input.lobsterProfile)}\nUser message: ${input.content}`,
         },
-      ])
+      ], input.context)
     } catch {
       return {
         id: `local-fallback-${Date.now()}`,
@@ -56,6 +57,7 @@ export const openclawAiAdapter = {
   async *streamLobsterChat(input: {
     content: string
     lobsterProfile: LobsterProfile
+    context?: LobsterChatContext
   }) {
     const output = await this.chatWithLobster(input)
     const chunks = output.text.match(/.{1,9}/gs) ?? [output.text]

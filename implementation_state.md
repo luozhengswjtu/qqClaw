@@ -88,7 +88,7 @@ apps/qq-lobster-v2
 
 实现目录已从零创建，未依赖历史 Demo 目录、旧实现代码或旧信息架构。
 
-## 阶段 0 / 阶段 1 / 阶段 1.5 / 阶段 3 / 阶段 4 / 阶段 5 / 阶段 6 完成情况
+## 阶段 0 / 阶段 1 / 阶段 1.5 / 阶段 3 / 阶段 4 / 阶段 5 / 阶段 6 / 阶段 7 完成情况
 
 1. 已创建 `apps/qq-lobster-v2`。
 2. 已搭建 `Vite + React + TypeScript + Tailwind CSS`。
@@ -108,9 +108,9 @@ apps/qq-lobster-v2
 16. 小龙虾私聊已通过统一 stream adapter 模拟流式输出，优先走 OpenClaw `/api/ai/chat`，失败时使用 mock fallback。
 17. 流式消息在 UI 上显示生成中、审查中、已完成、fallback 或失败状态。
 18. 第一次小龙虾聊天完成后会同步完成 `first_lobster_chat` 打卡，并调用 OpenClaw checkin API。
-19. 阶段 4 已完成：小龙虾私聊右侧按 10 步新手打卡顺序逐步展示，只显示已完成步骤和当前步骤，不一次暴露全部功能。
+19. 阶段 4 已完成并按最新反馈重构：小龙虾私聊右侧按 5 个用户可见打卡逐步展示，只显示当前大步骤；原 2-7 合并为“处理一次群聊提醒”。
 20. 前端本地 store 已支持每完成一步自动推进下一步；OpenClaw 不可用时仍能在本地完成演示。
-21. OpenClaw `checkins` 已写入 10 步打卡状态；完成打卡时会写入 `work_logs`，并按完成数量解锁 `rewards` 和 `achievements`。
+21. OpenClaw `checkins` 已写入 5 个用户可见打卡状态；完成打卡时会写入 `work_logs`，并按完成数量解锁 `rewards` 和 `achievements`。群聊提醒内部子动作继续通过权限、工具调用、AI 输出和工作记录留痕。
 22. 阶段 4 UI 改进已实施：右侧打卡已从列表面板改为“当前引导卡 + 轻量进度 + 下一奖励”，完成反馈进入中间聊天流，右侧不抢主聊天。
 23. 阶段 5 已完成：右侧“设置群聊权限”会在中间聊天流弹出权限设置卡，用户可多选具体群聊，并开启主动感知并总结群聊、生成回复草稿两类外露能力；日记素材不在权限卡中提前暴露。
 24. 权限保存优先写入 OpenClaw `/api/permissions`；多选时仍按群逐条写入 `permissions`、`work_logs`、`events` 和 permission memory，后端不可用时保留前端本地权限状态作为 fallback。
@@ -123,6 +123,9 @@ apps/qq-lobster-v2
 31. 回复草稿通过 OpenClaw `/api/ai/reply-draft` 生成，经过 `generate_reply_draft` 工具、权限检查、预览确认审查和 AI adapter；卡片明确标注“发送前需要你确认”，不会自动发群。
 32. 工作记录通过 OpenClaw `/api/ai/generate-work-log` 生成，返回 AI 文本和最新 `work_logs`，前端以工作记录卡展示，后续追问可基于记录继续。
 33. 阶段 6 保留降级：OpenClaw 或真实 AI 不可用时，前端仍生成本地 fallback 卡片，录屏流程不中断。
+34. 阶段 7 已完成：隐藏日记由 OpenClaw 基于认养、授权群、@ 信号、群聊总结和回复草稿记录判断触发，不作为显式生成按钮出现。
+35. 日记生成接入 `/api/ai/generate-diary`、`generate_diary` 工具、AI adapter、`agent_outputs`、`work_logs` 和 diary memory；`/api/diary/hidden-first` 查询状态，`/api/diary/hidden-first/reveal` 记录已查看，避免刷新后重复弹出。
+36. 前端在阶段 7 条件满足后自动弹出隐藏惊喜，用户点击“要看看”后回到小龙虾聊天流，展示第一人称日记和包含形象、金句、今日成就的日记卡；看完后右侧解锁“日记入口”。
 
 ## 最新边界修正
 
@@ -156,7 +159,7 @@ OPENCLAW_DB_PATH=<temp sqlite> OPENCLAW_PORT=8791 node src/server.js
 OPENCLAW_BASE_URL=http://127.0.0.1:8791 node scripts/smoke.js
 ```
 
-已验证 10 个打卡、第一步完成后自动激活 `first_group_permission`、奖励解锁、工作日志写入和 mock fallback。
+已验证 5 个用户可见打卡、第一步完成后自动激活 `first_group_permission`、奖励解锁、工作日志写入和 mock fallback。
 
 阶段 5 额外使用临时 SQLite 库验证：
 
@@ -175,6 +178,32 @@ OPENCLAW_BASE_URL=http://127.0.0.1:8897 node scripts/smoke.js
 ```
 
 已验证回复草稿返回 `previewRequired: true`、保留来源消息 `m-002`、工作记录卡返回 AI 文本和最新 `work_logs`，并继续写入 `agent_outputs`、`tool_runs`、`review_results` 和 `work_logs`。
+
+阶段 7 额外使用临时 SQLite 库验证：
+
+```text
+OPENCLAW_DB_PATH=<temp sqlite> OPENCLAW_PORT=8917 node src/server.js
+OPENCLAW_BASE_URL=http://127.0.0.1:8917 node scripts/smoke.js
+```
+
+已验证隐藏日记触发前 `canTrigger: true`，生成后 `triggered: true`，重复调用 `/api/ai/generate-diary` 不重新生成，查看后 `revealed: true` 且 `unlocked: true`。
+
+阶段 8 已完成：小龙虾空间接入 OpenClaw 和前端。
+
+1. OpenClaw 新增 `space_posts`、`space_comments`、`space_interactions`，空间动态、评论、点赞和分享独立记录。
+2. `/api/ai/generate-space-post` 会通过 `generate_space_post_preview` 工具、AI adapter、审查结果、`agent_outputs`、`work_logs` 和 space memory 生成小龙虾自己的空间动态。
+3. `/api/space` 返回空间状态；`/api/space/interactions` 记录点赞和分享；`/api/space/comments` 记录人类评论；`/api/ai/space-comment-reply` 生成小龙虾评论回复预览。
+4. 空间动态只由小龙虾发布，人类只能访问、点赞、评论、分享；好友评论和好友小龙虾评论先使用 seed mock 数据。
+5. 前端新增 `lobster_space` 视图、空间动态卡和右侧“龙虾空间”入口；日记查看后可存入空间，空间内可点赞、评论、分享，并触发小龙虾回复评论。
+
+阶段 8 额外使用临时 SQLite 库验证：
+
+```text
+OPENCLAW_DB_PATH=<temp sqlite> OPENCLAW_PORT=8928 node src/server.js
+OPENCLAW_BASE_URL=http://127.0.0.1:8928 node scripts/smoke.js
+```
+
+已验证空间动态返回 `previewRequired: true`，日记动态和成就动态均存在，点赞/评论/分享可落库，小龙虾评论回复保持预览态并写入动态评论区。
 
 本地浏览器已验证：
 
@@ -202,8 +231,10 @@ OPENCLAW_BASE_URL=http://127.0.0.1:8897 node scripts/smoke.js
 8. 阶段 4 的打卡引导是否适合录屏节奏，是否需要调整步骤命名或奖励节奏。
 9. 阶段 5 权限卡是否自然，群选择是否清楚，群聊感知卡里的 @ 信号、来源跳转和回到小龙虾入口是否符合录屏节奏。
 10. 阶段 6 核心文本卡片是否短而克制，摘要展开、回复草稿、工作记录和继续追问是否符合“发现 -> 提醒 -> 跳回原群”的链路。
-11. 下一步应进入阶段 7：隐藏日记惊喜。
-12. 后续阶段是否都能基于 OpenClaw 持续补齐 API、数据记录、工具调用、审查结果、AI adapter 和 fallback。
+11. 阶段 7 隐藏日记惊喜的触发时机、弹窗语气、日记卡视觉和右侧入口是否符合预期。
+12. 阶段 8 小龙虾空间的入口、头图、动态卡、评论区和分享引流是否符合预期。
+13. 下一步应进入阶段 9：录屏路径打磨。
+14. 后续阶段是否都能基于 OpenClaw 持续补齐 API、数据记录、工具调用、审查结果、AI adapter 和 fallback。
 
 ## 用户偏好
 

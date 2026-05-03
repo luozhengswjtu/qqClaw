@@ -164,6 +164,49 @@ function rowToEvent(row) {
   }
 }
 
+function rowToAgentOutput(row) {
+  return {
+    id: row.id,
+    type: row.type,
+    prompt: row.prompt,
+    input: parseJson(row.input_json, {}),
+    outputText: row.output_text,
+    source: row.source,
+    createdAt: row.created_at,
+  }
+}
+
+function rowToSpaceComment(row) {
+  return {
+    id: row.id,
+    postId: row.post_id,
+    authorId: row.author_id,
+    authorName: row.author_name,
+    authorAvatar: row.author_avatar,
+    authorType: row.author_type,
+    content: row.content,
+    sourceOutputId: row.source_output_id,
+    sourceToolRunId: row.source_tool_run_id,
+    previewRequired: row.preview_required === 1,
+    createdAt: row.created_at,
+  }
+}
+
+function rowToSpacePost(row) {
+  return {
+    id: row.id,
+    kind: row.kind,
+    authorLobsterId: row.author_lobster_id,
+    authorName: row.author_name,
+    content: row.content,
+    sourceOutputId: row.source_output_id,
+    sourceWorkLogId: row.source_work_log_id,
+    sourceToolRunId: row.source_tool_run_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
 const checkinSeeds = [
   {
     key: 'first_lobster_chat',
@@ -174,45 +217,11 @@ const checkinSeeds = [
   },
   {
     key: 'first_group_permission',
-    title: '设置群聊权限',
-    description: '选择一个群，并确认小龙虾可以做哪些事。',
+    title: '处理一次群聊提醒',
+    description:
+      '选择授权群，让小龙虾生成一张包含摘要、@ 信号、来源跳转和回复草稿入口的总结卡。',
     status: 'locked',
     rewardKey: 'shell-badge',
-  },
-  {
-    key: 'first_enable_mentions',
-    title: '开启群聊感知',
-    description: '让小龙虾主动看一个授权群里的重点和 @ 信号。',
-    status: 'locked',
-    rewardKey: null,
-  },
-  {
-    key: 'first_view_mentions',
-    title: '查看感知卡片',
-    description: '打开小龙虾整理出的群聊感知卡。',
-    status: 'locked',
-    rewardKey: 'mention-pin',
-  },
-  {
-    key: 'first_jump_source',
-    title: '跳转消息来源',
-    description: '从卡片一键回到原始群消息。',
-    status: 'locked',
-    rewardKey: null,
-  },
-  {
-    key: 'first_group_summary',
-    title: '查看群聊摘要',
-    description: '在感知卡里查看授权群聊的简短摘要。',
-    status: 'locked',
-    rewardKey: 'summary-badge',
-  },
-  {
-    key: 'first_reply_draft',
-    title: '生成回复草稿',
-    description: '让小龙虾给出一条只预览、不自动发送的回复。',
-    status: 'locked',
-    rewardKey: null,
   },
   {
     key: 'first_view_work_log',
@@ -223,8 +232,8 @@ const checkinSeeds = [
   },
   {
     key: 'first_space_post',
-    title: '发布空间预览',
-    description: '让小龙虾生成一条龙虾空间动态预览。',
+    title: '主动发布空间动态',
+    description: '让小龙虾感知值得记录的小节点，并自动发进本地龙虾空间。',
     status: 'locked',
     rewardKey: 'space-banner',
   },
@@ -247,38 +256,26 @@ const rewardSeeds = [
   {
     key: 'shell-badge',
     title: '亮晶晶虾壳',
-    description: '完成群聊权限设置后，小龙虾资料卡会点亮第一枚徽章。',
+    description: '生成第一张群聊总结卡后，小龙虾资料卡会点亮第一枚徽章。',
     requiredCheckins: 2,
-  },
-  {
-    key: 'mention-pin',
-    title: '提醒小别针',
-    description: '第一次查看群聊感知卡后解锁。',
-    requiredCheckins: 4,
-  },
-  {
-    key: 'summary-badge',
-    title: '摘要徽章',
-    description: '第一次查看群聊感知摘要后解锁。',
-    requiredCheckins: 6,
   },
   {
     key: 'logbook',
     title: '透明工作簿',
     description: '第一次查看工作记录后解锁。',
-    requiredCheckins: 8,
+    requiredCheckins: 3,
   },
   {
     key: 'space-banner',
     title: '龙虾空间头图',
-    description: '第一次生成空间动态预览后解锁。',
-    requiredCheckins: 9,
+    description: '第一次由小龙虾主动发布空间动态后解锁。',
+    requiredCheckins: 4,
   },
   {
     key: 'star-ornament',
     title: '星星挂饰',
     description: '完成全部新手打卡后解锁。',
-    requiredCheckins: 10,
+    requiredCheckins: 5,
   },
 ]
 
@@ -563,10 +560,27 @@ function insertSeedRows() {
 }
 
 function upsertGuideSeeds(timestamp = nowIso()) {
-  const legacyKeys = ['discover_lobster', 'adopt_lobster']
+  const legacyKeys = [
+    'discover_lobster',
+    'adopt_lobster',
+    'first_enable_mentions',
+    'first_view_mentions',
+    'first_jump_source',
+    'first_group_summary',
+    'first_reply_draft',
+  ]
+  const legacyRewardKeys = ['mention-pin', 'summary-badge']
   const deleteLegacyCheckin = db.prepare('DELETE FROM checkins WHERE key = ?')
   for (const key of legacyKeys) {
     deleteLegacyCheckin.run(key)
+  }
+  const deleteLegacyAchievement = db.prepare(
+    'DELETE FROM achievements WHERE reward_key = ?',
+  )
+  const deleteLegacyReward = db.prepare('DELETE FROM rewards WHERE key = ?')
+  for (const key of legacyRewardKeys) {
+    deleteLegacyAchievement.run(key)
+    deleteLegacyReward.run(key)
   }
 
   const upsertCheckin = db.prepare(`
@@ -697,9 +711,9 @@ function insertAgentSeedRows() {
     {
       key: 'generate_diary',
       title: '小龙虾日记',
-      description: '基于已发生的操作生成第一人称日记素材。',
+      description: '基于已沉淀的 checkins、work_logs 和 agent_outputs 生成第一人称日记素材。',
       triggers: ['日记', '写一篇'],
-      requiredPermissions: ['diary_material'],
+      requiredPermissions: [],
       riskLevel: 'medium',
       outputType: 'card',
       toolKeys: ['generate_diary'],
@@ -709,7 +723,7 @@ function insertAgentSeedRows() {
       title: '空间动态预览',
       description: '生成小龙虾空间动态预览，发布前需要确认和脱敏。',
       triggers: ['发空间', '空间动态'],
-      requiredPermissions: ['diary_material'],
+      requiredPermissions: [],
       riskLevel: 'high',
       outputType: 'preview',
       toolKeys: ['generate_space_post_preview'],
@@ -808,10 +822,10 @@ function insertAgentSeedRows() {
     {
       key: 'generate_diary',
       title: '生成日记素材',
-      description: '生成小龙虾第一人称日记素材。',
+      description: '基于 OpenClaw 已沉淀记录生成小龙虾第一人称日记素材。',
       inputSchema: { context: 'object' },
       outputSchema: { diary: 'string' },
-      requiredPermissions: ['diary_material'],
+      requiredPermissions: [],
       riskLevel: 'medium',
       requiresConfirmation: false,
       hasMock: true,
@@ -822,7 +836,7 @@ function insertAgentSeedRows() {
       description: '生成空间动态预览，发布前需要确认和脱敏。',
       inputSchema: { context: 'object' },
       outputSchema: { post: 'string', previewRequired: 'boolean' },
-      requiredPermissions: ['diary_material'],
+      requiredPermissions: [],
       riskLevel: 'high',
       requiresConfirmation: true,
       hasMock: true,
@@ -1052,6 +1066,42 @@ export function initDb() {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS space_posts (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      author_lobster_id TEXT NOT NULL,
+      author_name TEXT NOT NULL,
+      content TEXT NOT NULL,
+      source_output_id TEXT,
+      source_work_log_id TEXT,
+      source_tool_run_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS space_comments (
+      id TEXT PRIMARY KEY,
+      post_id TEXT NOT NULL REFERENCES space_posts(id),
+      author_id TEXT NOT NULL,
+      author_name TEXT NOT NULL,
+      author_avatar TEXT NOT NULL,
+      author_type TEXT NOT NULL,
+      content TEXT NOT NULL,
+      source_output_id TEXT,
+      source_tool_run_id TEXT,
+      preview_required INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS space_interactions (
+      id TEXT PRIMARY KEY,
+      post_id TEXT NOT NULL REFERENCES space_posts(id),
+      user_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      detail_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS ai_requests (
       id TEXT PRIMARY KEY,
       type TEXT NOT NULL,
@@ -1184,6 +1234,8 @@ export function getBootstrap() {
     rewards: getRewards(),
     achievements: getAchievements(),
     workLogs: getWorkLogs(20),
+    diary: getHiddenDiaryState(),
+    space: getSpaceState(),
     agent: getAgentRegistry(),
   }
 }
@@ -1234,6 +1286,13 @@ export function getWorkLogs(limit = 50) {
       detail: parseJson(row.detail_json, {}),
       createdAt: row.created_at,
     }))
+}
+
+export function getAgentOutputs(limit = 50) {
+  return db
+    .prepare('SELECT * FROM agent_outputs ORDER BY created_at DESC LIMIT ?')
+    .all(limit)
+    .map(rowToAgentOutput)
 }
 
 export function getRewards() {
@@ -1315,6 +1374,322 @@ export function getAgentRegistry() {
     reviewPolicies: getReviewPolicies(),
     memories: getMemories(20),
   }
+}
+
+function getSpacePostsRaw() {
+  return db
+    .prepare('SELECT * FROM space_posts ORDER BY created_at DESC')
+    .all()
+    .map(rowToSpacePost)
+}
+
+function getSpaceCommentsForPost(postId) {
+  return db
+    .prepare('SELECT * FROM space_comments WHERE post_id = ? ORDER BY created_at')
+    .all(postId)
+    .map(rowToSpaceComment)
+}
+
+function getSpaceInteractionCounts(postId) {
+  const rows = db
+    .prepare(`
+      SELECT type, COUNT(*) AS count
+      FROM space_interactions
+      WHERE post_id = ?
+      GROUP BY type
+    `)
+    .all(postId)
+
+  return rows.reduce(
+    (counts, row) => ({
+      ...counts,
+      [row.type]: row.count,
+    }),
+    { like: 0, share: 0 },
+  )
+}
+
+function getLatestHiddenDiaryForSpace() {
+  const state = getHiddenDiaryState()
+  return state.entry ?? state.entries[0] ?? null
+}
+
+function ensureSeedSpacePosts() {
+  const timestamp = nowIso()
+  const lobster = rowToLobster(
+    db.prepare('SELECT * FROM lobsters WHERE user_id = ?').get('u-me'),
+  )
+  const lobsterName = lobster?.name || '小钳'
+  const hasAchievementPost = db
+    .prepare("SELECT 1 FROM space_posts WHERE kind = 'achievement' LIMIT 1")
+    .get()
+  const latestAchievement = getAchievements()[0]
+
+  if (!hasAchievementPost && latestAchievement) {
+    const achievementPost = saveSpacePost({
+      kind: 'achievement',
+      content: `${lobsterName} 解锁了「${latestAchievement.title}」。今天的打卡又往前走了一步。`,
+      sourceWorkLogId: latestAchievement.id,
+    })
+    seedSpaceComments(achievementPost.id, timestamp)
+  }
+
+  for (const post of getSpacePostsRaw()) {
+    seedSpaceComments(post.id, timestamp)
+  }
+}
+
+function seedSpaceComments(postId, timestamp = nowIso()) {
+  const existing = db
+    .prepare('SELECT COUNT(*) AS count FROM space_comments WHERE post_id = ?')
+    .get(postId).count
+
+  if (existing > 0) {
+    return
+  }
+
+  const comments = [
+    {
+      id: `space-comment-${postId}-friend`,
+      authorId: 'u-yang',
+      authorName: '杨夏',
+      authorAvatar: '杨',
+      authorType: 'friend',
+      content: '这个像真的住进 QQ 里的小伙伴了。',
+    },
+    {
+      id: `space-comment-${postId}-lobster-friend`,
+      authorId: 'lobster-lanlan',
+      authorName: '蓝蓝虾',
+      authorAvatar: '蓝',
+      authorType: 'friend_lobster',
+      content: '我也想来评论一下，今天的小钳很认真。',
+    },
+  ]
+
+  const insert = db.prepare(`
+    INSERT INTO space_comments (
+      id, post_id, author_id, author_name, author_avatar, author_type, content,
+      source_output_id, source_tool_run_id, preview_required, created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO NOTHING
+  `)
+
+  for (const comment of comments) {
+    insert.run(
+      comment.id,
+      postId,
+      comment.authorId,
+      comment.authorName,
+      comment.authorAvatar,
+      comment.authorType,
+      comment.content,
+      null,
+      null,
+      0,
+      timestamp,
+    )
+  }
+}
+
+export function getSpaceState() {
+  ensureSeedSpacePosts()
+
+  const posts = getSpacePostsRaw().map((post) => {
+    const comments = getSpaceCommentsForPost(post.id)
+    const interactions = getSpaceInteractionCounts(post.id)
+
+    return {
+      ...post,
+      comments,
+      likeCount: interactions.like,
+      shareCount: interactions.share,
+      commentCount: comments.length,
+      likedByMe: Boolean(
+        db
+          .prepare(
+            "SELECT 1 FROM space_interactions WHERE post_id = ? AND user_id = ? AND type = 'like'",
+          )
+          .get(post.id, 'u-me'),
+      ),
+    }
+  })
+
+  return {
+    owner: rowToLobster(
+      db.prepare('SELECT * FROM lobsters WHERE user_id = ?').get('u-me'),
+    ),
+    posts,
+  }
+}
+
+export function saveSpacePost(input) {
+  const timestamp = nowIso()
+  const lobster = rowToLobster(
+    db.prepare('SELECT * FROM lobsters WHERE user_id = ?').get('u-me'),
+  )
+  const id = input.id || `space-post-${timestamp}-${Math.random().toString(16).slice(2)}`
+  const kind = String(input.kind || 'diary')
+  const content = String(input.content || '').trim()
+
+  if (!content) {
+    const error = new Error('Space post content is required')
+    error.status = 400
+    throw error
+  }
+
+  db.prepare(`
+    INSERT INTO space_posts (
+      id, kind, author_lobster_id, author_name, content, source_output_id,
+      source_work_log_id, source_tool_run_id, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    kind,
+    lobster?.id || 'lobster-xiaoqian',
+    lobster?.name || '小钳',
+    content,
+    input.sourceOutputId || null,
+    input.sourceWorkLogId || null,
+    input.sourceToolRunId || null,
+    timestamp,
+    timestamp,
+  )
+
+  writeWorkLog('space-post', 'Lobster space post created', {
+    postId: id,
+    kind,
+    sourceOutputId: input.sourceOutputId || null,
+    sourceWorkLogId: input.sourceWorkLogId || null,
+    sourceToolRunId: input.sourceToolRunId || null,
+  })
+  writeMemory(
+    'space',
+    `post.${id}`,
+    {
+      postId: id,
+      kind,
+      content,
+    },
+    'space_post',
+    id,
+  )
+  writeEvent('space.post.created', {
+    postId: id,
+    kind,
+  })
+  seedSpaceComments(id, timestamp)
+
+  return rowToSpacePost(db.prepare('SELECT * FROM space_posts WHERE id = ?').get(id))
+}
+
+export function recordSpaceInteraction(input) {
+  const post = db.prepare('SELECT * FROM space_posts WHERE id = ?').get(input.postId)
+  if (!post) {
+    const error = new Error(`Unknown space post: ${input.postId}`)
+    error.status = 404
+    throw error
+  }
+
+  const type = String(input.type || '')
+  if (!['like', 'share'].includes(type)) {
+    const error = new Error(`Unsupported space interaction: ${type}`)
+    error.status = 400
+    throw error
+  }
+
+  if (type === 'like') {
+    const existing = db
+      .prepare(
+        "SELECT * FROM space_interactions WHERE post_id = ? AND user_id = ? AND type = 'like'",
+      )
+      .get(input.postId, 'u-me')
+    if (existing) {
+      return getSpaceState()
+    }
+  }
+
+  const createdAt = nowIso()
+  const id = `space-interaction-${createdAt}-${Math.random().toString(16).slice(2)}`
+  db.prepare(`
+    INSERT INTO space_interactions (id, post_id, user_id, type, detail_json, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    input.postId,
+    'u-me',
+    type,
+    asJson(input.detail || {}),
+    createdAt,
+  )
+
+  writeWorkLog('space-interaction', 'Space interaction recorded', {
+    postId: input.postId,
+    type,
+  })
+  writeEvent('space.interaction.recorded', {
+    postId: input.postId,
+    type,
+  })
+
+  return getSpaceState()
+}
+
+export function saveSpaceComment(input) {
+  const post = db.prepare('SELECT * FROM space_posts WHERE id = ?').get(input.postId)
+  if (!post) {
+    const error = new Error(`Unknown space post: ${input.postId}`)
+    error.status = 404
+    throw error
+  }
+
+  const content = String(input.content || '').trim()
+  if (!content) {
+    const error = new Error('Space comment content is required')
+    error.status = 400
+    throw error
+  }
+
+  const createdAt = nowIso()
+  const id = input.id || `space-comment-${createdAt}-${Math.random().toString(16).slice(2)}`
+
+  db.prepare(`
+    INSERT INTO space_comments (
+      id, post_id, author_id, author_name, author_avatar, author_type, content,
+      source_output_id, source_tool_run_id, preview_required, created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    input.postId,
+    input.authorId || 'u-me',
+    input.authorName || '小北',
+    input.authorAvatar || '北',
+    input.authorType || 'human',
+    content,
+    input.sourceOutputId || null,
+    input.sourceToolRunId || null,
+    input.previewRequired ? 1 : 0,
+    createdAt,
+  )
+
+  writeWorkLog('space-comment', 'Space comment recorded', {
+    postId: input.postId,
+    commentId: id,
+    authorType: input.authorType || 'human',
+    previewRequired: !!input.previewRequired,
+  })
+  writeEvent('space.comment.created', {
+    postId: input.postId,
+    commentId: id,
+    authorType: input.authorType || 'human',
+  })
+
+  return rowToSpaceComment(
+    db.prepare('SELECT * FROM space_comments WHERE id = ?').get(id),
+  )
 }
 
 export function resolveCapability(input) {
@@ -1835,6 +2210,211 @@ export function savePermissions(input) {
   return getPermissions().find((item) => item.groupId === groupId)
 }
 
+function getHiddenDiaryEntry() {
+  const row = db
+    .prepare("SELECT * FROM memories WHERE layer = 'diary' AND key = ?")
+    .get('hidden_first_diary')
+
+  return row ? rowToMemory(row).value : null
+}
+
+export function getDiaryTriggerContext() {
+  const lobster = rowToLobster(
+    db.prepare('SELECT * FROM lobsters WHERE user_id = ?').get('u-me'),
+  )
+  const checkins = getCheckins()
+  const permissions = getPermissions()
+  const workLogs = getWorkLogs(80)
+  const agentOutputs = getAgentOutputs(40)
+
+  const completedCheckins = checkins
+    .filter((item) => item.status === 'done')
+    .map((item) => item.key)
+  const authorizedGroups = permissions.filter(
+    (permission) => permission.summarizeGroup,
+  )
+  const summaryLogs = workLogs.filter((item) => item.type === 'summarize-group')
+  const replyDraftLogs = workLogs.filter((item) => item.type === 'reply-draft')
+  const summaryOutputs = agentOutputs.filter(
+    (item) => item.type === 'summarize_group',
+  )
+  const replyDraftOutputs = agentOutputs.filter(
+    (item) => item.type === 'generate_reply_draft',
+  )
+  const hasMentionSignal = summaryLogs.some(
+    (item) => Number(item.detail?.mentionCount || 0) > 0,
+  )
+
+  const checks = [
+    {
+      key: 'adopted',
+      passed: Boolean(lobster?.adoptedAt),
+    },
+    {
+      key: 'first_lobster_chat_done',
+      passed: completedCheckins.includes('first_lobster_chat'),
+    },
+    {
+      key: 'authorized_group',
+      passed: authorizedGroups.length > 0,
+    },
+    {
+      key: 'viewed_at_signal',
+      passed: hasMentionSignal,
+    },
+    {
+      key: 'summarized_group',
+      passed: summaryLogs.length > 0 && summaryOutputs.length > 0,
+    },
+    {
+      key: 'reply_draft_generated',
+      passed: replyDraftLogs.length > 0 && replyDraftOutputs.length > 0,
+    },
+  ]
+
+  return {
+    eligible: checks.every((item) => item.passed),
+    checks,
+    materials: {
+      lobster,
+      completedCheckins,
+      authorizedGroups: authorizedGroups.map((item) => item.groupId),
+      latestWorkLogs: workLogs.slice(0, 8),
+      latestAgentOutputs: agentOutputs.slice(0, 6).map((item) => ({
+        id: item.id,
+        type: item.type,
+        outputText: item.outputText,
+        source: item.source,
+        createdAt: item.createdAt,
+      })),
+      mentionCount: summaryLogs.reduce(
+        (count, item) => count + Number(item.detail?.mentionCount || 0),
+        0,
+      ),
+      summaryOutputId: summaryOutputs[0]?.id ?? null,
+      replyDraftOutputId: replyDraftOutputs[0]?.id ?? null,
+    },
+  }
+}
+
+export function getHiddenDiaryState() {
+  const context = getDiaryTriggerContext()
+  const entry = getHiddenDiaryEntry()
+
+  return {
+    eligible: context.eligible,
+    canTrigger: context.eligible && !entry,
+    checks: context.checks,
+    triggered: Boolean(entry),
+    revealed: Boolean(entry?.revealedAt),
+    unlocked: Boolean(entry?.revealedAt),
+    entry,
+    entries: entry ? [entry] : [],
+  }
+}
+
+export function saveHiddenDiaryEntry(input) {
+  const createdAt = input.createdAt || nowIso()
+  const entry = {
+    id: input.id || `hidden-diary-${createdAt}`,
+    title: input.title || '偷偷写的一页',
+    text: input.text,
+    quote: input.quote,
+    todayAchievement: input.todayAchievement,
+    source: input.source,
+    outputId: input.outputId,
+    toolRunId: input.toolRunId,
+    image: input.image ?? null,
+    createdAt,
+    revealedAt: input.revealedAt ?? null,
+  }
+
+  writeMemory(
+    'diary',
+    'hidden_first_diary',
+    entry,
+    'agent_output',
+    entry.outputId,
+  )
+  writeEvent('diary.hidden_first.triggered', {
+    diaryId: entry.id,
+    outputId: entry.outputId,
+    toolRunId: entry.toolRunId,
+  })
+
+  return entry
+}
+
+export function attachHiddenDiaryImage(image) {
+  const entry = getHiddenDiaryEntry()
+  if (!entry) {
+    const error = new Error('Hidden diary has not been triggered')
+    error.status = 404
+    throw error
+  }
+
+  const updatedEntry = {
+    ...entry,
+    image,
+  }
+
+  writeMemory(
+    'diary',
+    'hidden_first_diary',
+    updatedEntry,
+    'image',
+    image.id,
+  )
+  writeWorkLog('diary-image', 'Diary image generated', {
+    diaryId: updatedEntry.id,
+    imageId: image.id,
+    source: image.source,
+  })
+  writeEvent('diary.hidden_first.image_generated', {
+    diaryId: updatedEntry.id,
+    imageId: image.id,
+    source: image.source,
+  })
+
+  return updatedEntry
+}
+
+export function revealHiddenDiaryEntry() {
+  const entry = getHiddenDiaryEntry()
+  if (!entry) {
+    const error = new Error('Hidden diary has not been triggered')
+    error.status = 404
+    throw error
+  }
+
+  const revealedEntry = entry.revealedAt
+    ? entry
+    : {
+        ...entry,
+        revealedAt: nowIso(),
+      }
+
+  if (!entry.revealedAt) {
+    writeMemory(
+      'diary',
+      'hidden_first_diary',
+      revealedEntry,
+      'agent_output',
+      revealedEntry.outputId,
+    )
+    writeWorkLog('hidden-diary-reveal', 'Hidden diary revealed', {
+      diaryId: revealedEntry.id,
+      outputId: revealedEntry.outputId,
+    })
+    writeEvent('diary.hidden_first.revealed', {
+      diaryId: revealedEntry.id,
+      outputId: revealedEntry.outputId,
+    })
+  }
+
+  return getHiddenDiaryState()
+}
+
 export function completeCheckin(key, writeLog = true) {
   const existing = db.prepare('SELECT * FROM checkins WHERE key = ?').get(key)
   if (!existing) {
@@ -1855,12 +2435,7 @@ export function completeCheckin(key, writeLog = true) {
 
   const nextByKey = {
     first_lobster_chat: 'first_group_permission',
-    first_group_permission: 'first_enable_mentions',
-    first_enable_mentions: 'first_view_mentions',
-    first_view_mentions: 'first_jump_source',
-    first_jump_source: 'first_group_summary',
-    first_group_summary: 'first_reply_draft',
-    first_reply_draft: 'first_view_work_log',
+    first_group_permission: 'first_view_work_log',
     first_view_work_log: 'first_space_post',
     first_space_post: 'first_space_comment',
   }

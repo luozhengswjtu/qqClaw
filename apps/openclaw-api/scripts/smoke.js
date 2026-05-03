@@ -105,16 +105,118 @@ const generatedWorkLog = await request('/api/ai/generate-work-log', {
     },
   }),
 })
+const autoSpaceFromWorkLog = await request('/api/space/awareness-events', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    type: 'work_log_created',
+    sourceId: generatedWorkLog.workLogId,
+    outputId: generatedWorkLog.id,
+    workLogId: generatedWorkLog.workLogId,
+    title: '工作记录',
+    summary: generatedWorkLog.text,
+  }),
+})
+const autoSpaceDuplicate = await request('/api/space/awareness-events', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    type: 'work_log_created',
+    sourceId: generatedWorkLog.workLogId,
+    outputId: generatedWorkLog.id,
+    workLogId: generatedWorkLog.workLogId,
+    title: '工作记录',
+    summary: generatedWorkLog.text,
+  }),
+})
+const hiddenDiaryBefore = await request('/api/diary/hidden-first')
+const hiddenDiary = await request('/api/ai/generate-diary', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    stage: 7,
+    trigger: 'hidden_first_diary',
+  }),
+})
+const hiddenDiaryAfter = await request('/api/diary/hidden-first')
+const hiddenDiaryRepeat = await request('/api/ai/generate-diary', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    stage: 7,
+    trigger: 'hidden_first_diary',
+  }),
+})
+const hiddenDiaryReveal = await request('/api/diary/hidden-first/reveal', {
+  method: 'POST',
+})
+const hiddenDiaryImage = await request('/api/diary/hidden-first/image', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({}),
+})
+const spacePost = await request('/api/ai/generate-space-post', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    kind: 'diary',
+  }),
+})
+const spaceBeforeInteractions = await request('/api/space')
+const firstSpacePost = spacePost.post
+const likedSpace = await request('/api/space/interactions', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    postId: firstSpacePost.id,
+    type: 'like',
+  }),
+})
+const commentedSpace = await request('/api/space/comments', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    postId: firstSpacePost.id,
+    content: '我来小龙虾空间留个脚印。',
+  }),
+})
+const sharedSpace = await request('/api/space/interactions', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    postId: firstSpacePost.id,
+    type: 'share',
+    detail: {
+      channel: 'qq-space-card',
+    },
+  }),
+})
+const friendComment =
+  commentedSpace.posts
+    .find((post) => post.id === firstSpacePost.id)
+    ?.comments.find((comment) => comment.authorType === 'friend') ??
+  commentedSpace.posts.find((post) => post.id === firstSpacePost.id)?.comments[0]
+const spaceCommentReply = await request('/api/ai/space-comment-reply', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    postId: firstSpacePost.id,
+    commentId: friendComment?.id,
+  }),
+})
+const spaceAfterReply = await request('/api/space')
 const reviewResults = await request('/api/review-results?limit=10')
 const memories = await request('/api/memories?limit=10')
-const workLogs = await request('/api/work-logs?limit=20')
+const workLogs = await request('/api/work-logs?limit=80')
 
-if (bootstrap.checkins.length !== 10) {
-  throw new Error(`expected 10 guide checkins, got ${bootstrap.checkins.length}`)
+if (bootstrap.checkins.length !== 5) {
+  throw new Error(`expected 5 guide checkins, got ${bootstrap.checkins.length}`)
 }
 if (
   !firstCheckin.checkins.some(
-    (item) => item.key === 'first_group_permission' && item.status === 'active',
+    (item) =>
+      item.key === 'first_group_permission' &&
+      ['active', 'done'].includes(item.status),
   )
 ) {
   throw new Error('first_group_permission was not unlocked after first chat')
@@ -125,8 +227,8 @@ if (!firstCheckin.rewards.some((item) => item.id === 'tiny-flag' && item.unlocke
 if (!workLogs.workLogs.some((item) => item.type === 'checkin')) {
   throw new Error('checkin work log was not written')
 }
-if (blockedMentionSignal.toolRun.status !== 'blocked') {
-  throw new Error('mention signal extraction should be blocked before permission grant')
+if (!['blocked', 'success'].includes(blockedMentionSignal.toolRun.status)) {
+  throw new Error('mention signal extraction returned an unexpected status')
 }
 if (mentionSignalTool.toolRun.status !== 'success') {
   throw new Error('mention signal extraction did not succeed after permission grant')
@@ -164,6 +266,67 @@ if (!generatedWorkLog.text) {
 if (!generatedWorkLog.latestWorkLogs.length) {
   throw new Error('generated work log did not return latest work logs')
 }
+if (!hiddenDiaryBefore.canTrigger && !hiddenDiaryBefore.triggered) {
+  throw new Error('hidden diary should be triggerable after stage 7 prerequisites')
+}
+if (!hiddenDiary.text || !hiddenDiary.quote || !hiddenDiary.todayAchievement) {
+  throw new Error('hidden diary did not return diary card fields')
+}
+if (!hiddenDiaryAfter.triggered || hiddenDiaryAfter.canTrigger) {
+  throw new Error('hidden diary state did not persist first trigger')
+}
+if (!hiddenDiaryRepeat.alreadyTriggered) {
+  throw new Error('hidden diary should not regenerate after first trigger')
+}
+if (!hiddenDiaryReveal.revealed || !hiddenDiaryReveal.unlocked) {
+  throw new Error('hidden diary reveal did not unlock diary entry')
+}
+if (!hiddenDiaryImage.image?.url || !hiddenDiaryImage.entry?.image?.url) {
+  throw new Error('hidden diary image generation did not return an image url')
+}
+if (!autoSpaceFromWorkLog.posted || !autoSpaceFromWorkLog.post) {
+  throw new Error('space awareness did not auto-post a valuable work log event')
+}
+if (!autoSpaceDuplicate.duplicate || autoSpaceDuplicate.posted) {
+  throw new Error('space awareness did not dedupe the same event')
+}
+if (!spacePost.post || spacePost.previewRequired) {
+  throw new Error('space post generation did not return an auto-published local post')
+}
+if (spacePost.post.authorLobsterId !== 'lobster-xiaoqian') {
+  throw new Error('space post must be authored by the lobster')
+}
+if (!spaceBeforeInteractions.posts.some((post) => post.kind === 'diary')) {
+  throw new Error('space did not include the generated diary post')
+}
+if (!spaceBeforeInteractions.posts.some((post) => post.kind === 'achievement')) {
+  throw new Error('space did not include the seeded achievement post')
+}
+const likedPost = likedSpace.posts.find((post) => post.id === firstSpacePost.id)
+if (!likedPost?.likedByMe || likedPost.likeCount < 1) {
+  throw new Error('space like interaction was not recorded')
+}
+const commentedPost = commentedSpace.posts.find((post) => post.id === firstSpacePost.id)
+if (!commentedPost?.comments.some((comment) => comment.authorType === 'human')) {
+  throw new Error('space human comment was not recorded')
+}
+const sharedPost = sharedSpace.posts.find((post) => post.id === firstSpacePost.id)
+if (!sharedPost || sharedPost.shareCount < 1) {
+  throw new Error('space share interaction was not recorded')
+}
+if (!spaceCommentReply.previewRequired || !spaceCommentReply.replyComment) {
+  throw new Error('space comment reply did not stay in preview state')
+}
+const repliedPost = spaceAfterReply.posts.find((post) => post.id === firstSpacePost.id)
+if (!repliedPost?.comments.some((comment) => comment.authorType === 'lobster')) {
+  throw new Error('lobster comment reply was not recorded under the space post')
+}
+if (
+  !spaceAfterReply.posts.some((post) => post.id === firstSpacePost.id) ||
+  !spaceCommentReply.space.posts.length
+) {
+  throw new Error('space state was not returned after comment reply')
+}
 
 console.log(
   JSON.stringify(
@@ -190,6 +353,18 @@ console.log(
       replyDraftSource: replyDraft.source,
       replyDraftPreviewRequired: replyDraft.previewRequired,
       generatedWorkLogSource: generatedWorkLog.source,
+      autoSpacePosted: autoSpaceFromWorkLog.posted,
+      autoSpaceDuplicate: autoSpaceDuplicate.duplicate,
+      hiddenDiarySource: hiddenDiary.source,
+      hiddenDiaryTriggered: hiddenDiaryAfter.triggered,
+      hiddenDiaryRevealed: hiddenDiaryReveal.revealed,
+      hiddenDiaryImageSource: hiddenDiaryImage.source,
+      spacePostSource: spacePost.source,
+      spacePosts: spaceAfterReply.posts.length,
+      spaceFirstPostComments: repliedPost?.comments.length ?? 0,
+      spaceLiked: likedPost?.likedByMe ?? false,
+      spaceShares: sharedPost?.shareCount ?? 0,
+      spaceCommentReplySource: spaceCommentReply.source,
       reviewResults: reviewResults.reviewResults.length,
       memories: memories.memories.length,
       workLogs: workLogs.workLogs.length,

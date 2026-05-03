@@ -103,6 +103,64 @@ export interface WorkLogEntry {
   createdAt: string
 }
 
+export interface LobsterImageAsset {
+  id: string
+  type: string
+  url: string
+  mimeType?: string
+  prompt?: string
+  source: 'real-ai' | 'mock-fallback' | 'local-fallback'
+  provider?: string
+  model?: string
+  createdAt: string
+}
+
+export interface LobsterDiaryEntry {
+  id: string
+  title: string
+  text: string
+  quote: string
+  todayAchievement: string
+  source: 'real-ai' | 'mock-fallback' | 'local-fallback'
+  outputId?: string
+  toolRunId?: string
+  image?: LobsterImageAsset | null
+  createdAt: string
+  revealedAt?: string | null
+}
+
+export interface LobsterSpaceComment {
+  id: string
+  postId: string
+  authorId: string
+  authorName: string
+  authorAvatar: string
+  authorType: 'human' | 'friend' | 'friend_lobster' | 'lobster'
+  content: string
+  sourceOutputId?: string | null
+  sourceToolRunId?: string | null
+  previewRequired?: boolean
+  createdAt: string
+}
+
+export interface LobsterSpacePost {
+  id: string
+  kind: 'diary' | 'achievement' | 'status'
+  authorLobsterId: string
+  authorName: string
+  content: string
+  sourceOutputId?: string | null
+  sourceWorkLogId?: string | null
+  sourceToolRunId?: string | null
+  likeCount: number
+  commentCount: number
+  shareCount: number
+  likedByMe: boolean
+  comments: LobsterSpaceComment[]
+  createdAt: string
+  updatedAt?: string
+}
+
 export interface SummaryCardGroup {
   groupId: string
   groupTitle: string
@@ -113,6 +171,40 @@ export interface SummaryCardGroup {
   outputId?: string
   source: 'real-ai' | 'mock-fallback' | 'local-fallback'
 }
+
+export interface SummaryCardFollowUpContext {
+  type: 'summary_card_follow_up'
+  summaryCard: {
+    groupId: string
+    groupTitle: string
+    summary: string
+    source: SummaryCardGroup['source']
+    outputId?: string
+    sourceMessageIds: string[]
+    mentions: Array<Pick<
+      QQMessage,
+      | 'id'
+      | 'conversationId'
+      | 'senderName'
+      | 'content'
+      | 'sentAt'
+      | 'kind'
+      | 'sourceLabel'
+    >>
+    sourceMessages: Array<Pick<
+      QQMessage,
+      | 'id'
+      | 'conversationId'
+      | 'senderName'
+      | 'content'
+      | 'sentAt'
+      | 'kind'
+      | 'sourceLabel'
+    >>
+  }
+}
+
+export type LobsterChatContext = SummaryCardFollowUpContext
 
 export type LobsterChatCard =
   | {
@@ -149,6 +241,16 @@ export type LobsterChatCard =
       workLogId?: string
       latestWorkLogs: WorkLogEntry[]
       outputId?: string
+      source: 'real-ai' | 'mock-fallback' | 'local-fallback'
+    }
+  | {
+      type: 'diary_card'
+      entry: LobsterDiaryEntry
+    }
+  | {
+      type: 'space_post_card'
+      post: LobsterSpacePost
+      previewRequired: boolean
       source: 'real-ai' | 'mock-fallback' | 'local-fallback'
     }
 
@@ -194,14 +296,4 @@ export interface LobsterReward {
   requiredCheckIns: number
   unlocked: boolean
   unlockedAt?: string | null
-}
-
-export interface LobsterSpacePost {
-  id: string
-  authorLobsterId: string
-  content: string
-  createdAt: string
-  cardId?: string
-  likeCount: number
-  commentCount: number
 }

@@ -8,7 +8,11 @@ export function QQMainView() {
 
   return (
     <>
-      {appView === 'lobster_chat' ? <LobsterChatView /> : <QQShell />}
+      {appView === 'lobster_chat' || appView === 'lobster_space' ? (
+        <LobsterChatView />
+      ) : (
+        <QQShell />
+      )}
       {appView === 'adoption' ? <AdoptionFlow /> : null}
     </>
   )

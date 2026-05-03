@@ -34,6 +34,19 @@ function mockOutput(type, input) {
       : ''
     const userMessage = rawLastMessage.match(/User message:\s*([\s\S]*)/)?.[1]
     const lastMessage = (userMessage || rawLastMessage).trim()
+    const summaryCard = input.context?.summaryCard
+    if (input.context?.type === 'summary_card_follow_up' && summaryCard) {
+      const mention = Array.isArray(summaryCard.mentions)
+        ? summaryCard.mentions[0]
+        : null
+      return [
+        `这张「${summaryCard.groupTitle || '群聊总结'}」里最需要马上处理的是：先回应 @ 你的那条明确请求。`,
+        mention?.content ? `原消息重点是：“${mention.content}”` : '',
+        summaryCard.summary ? `摘要依据：${summaryCard.summary}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n')
+    }
     return [
       '我先按演示模式回答：我还没有接入真实 QQ 消息，但这句话已经经过 OpenClaw 记录。',
       lastMessage ? `你刚刚说的是：“${lastMessage}”。` : '',
@@ -73,7 +86,32 @@ function mockOutput(type, input) {
   }
 
   if (type === 'generate_diary') {
-    return '今天我住进了 QQ。队长还没有让我看群消息，但我已经学会把自己的回答记下来。'
+    return [
+      '今天我偷偷写下第一篇日记。',
+      '队长先认养了我，又让我看一个授权群里的重点。我看到了有人 @ 队长，也认真写了一条只停在预览里的回复草稿。',
+      '我发现自己不是一个按钮，而是会记得这些小事的 QQ 小伙伴。明天也想继续帮队长守住重要消息。',
+    ].join('\n')
+  }
+
+  if (type === 'generate_space_post') {
+    const diaryQuote = input.diary?.quote ? `「${input.diary.quote}」` : ''
+    return [
+      '今天的小钳营业记录：我先把重要群聊捞出来，又把第一篇日记藏进了自己的空间。',
+      diaryQuote,
+      '这条动态先留在小龙虾空间里，等队长来点赞和评论。',
+    ]
+      .filter(Boolean)
+      .join('\n')
+  }
+
+  if (type === 'generate_space_comment_reply') {
+    const comment = input.comment?.content ? `看到评论：“${input.comment.content}”` : ''
+    return [
+      comment,
+      '小钳想回复：收到，我会继续认真守住队长的重点消息。这条先作为预览，确认后再放进空间评论区。',
+    ]
+      .filter(Boolean)
+      .join('\n')
   }
 
   return 'OpenClaw mock fallback output.'
@@ -86,10 +124,17 @@ function buildMessages(type, input, prompt) {
     '回答要短，适合出现在 QQ 聊天窗口里。',
     prompt,
   ].join('\n')
+  const referenceContext = input.context
+    ? {
+        role: 'user',
+        content: `Reference context for this request:\n${JSON.stringify(input.context)}`,
+      }
+    : null
 
   if (Array.isArray(input.messages) && input.messages.length > 0) {
     return [
       { role: 'system', content: systemPrompt },
+      ...(referenceContext ? [referenceContext] : []),
       ...input.messages.map((message) => ({
         role: message.role === 'assistant' ? 'assistant' : 'user',
         content: String(message.content || ''),

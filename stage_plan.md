@@ -423,15 +423,12 @@ apps/openclaw-api: npm run smoke
 ### 打卡顺序
 
 1. 第一次和小龙虾对话。
-2. 第一次设置群聊权限。
-3. 第一次生成群聊感知卡。
-4. 第一次查看群聊感知卡。
-5. 第一次一键跳转来源。
-6. 第一次查看群聊摘要。
-7. 第一次生成回复草稿。
-8. 第一次查看工作记录。
-9. 第一次让小龙虾发龙虾空间动态。
-10. 第一次在龙虾空间评论回复。
+2. 处理一次群聊提醒。
+3. 第一次查看工作记录。
+4. 第一次让小龙虾发龙虾空间动态。
+5. 第一次在龙虾空间评论回复。
+
+“处理一次群聊提醒”是一个完整功能闭环，不拆成右侧连续小打卡；内部仍包含设置群聊权限、生成群聊总结卡、查看卡片、跳回原群、展开摘要和写回复草稿，并继续写入 OpenClaw 日志。
 
 ### 验收标准
 
@@ -589,6 +586,15 @@ apps/openclaw-api: npm run smoke
 4. 已触发日记状态写入数据库，避免刷新后重复弹出第一次惊喜。
 5. AI 失败时使用预设日记 mock fallback。
 
+### 执行记录
+
+1. 已实现隐藏日记触发：后端基于已认养、已授权群聊、已出现 @ 信号、已生成群聊总结和已生成回复草稿判断是否可触发。
+2. 日记生成接入 OpenClaw `/api/ai/generate-diary`，会读取 `checkins`、`work_logs` 和 `agent_outputs` 作为素材，通过 `generate_diary` 工具和 AI adapter 生成第一人称日记。
+3. 第一次触发结果写入 `agent_outputs`、`work_logs` 和 diary memory；`GET /api/diary/hidden-first` 可查询状态，`POST /api/diary/hidden-first/reveal` 会记录已查看，避免刷新后重复弹出第一次惊喜。
+4. 前端已在完成摘要和回复草稿链路后自动触发隐藏惊喜弹层，用户点击“要看看”后进入小龙虾聊天流，展示日记正文和美术化日记卡片。
+5. 日记卡包含小龙虾形象、金句和今日成就；看完后右侧解锁“日记入口”，可查看历史日记。
+6. 已验证阶段 7 smoke：触发前 `canTrigger: true`，生成后 `triggered: true`，重复调用不重新生成，revealed 后 `unlocked: true`；真实 AI 不可用时使用 mock fallback。
+
 ## 阶段 8：小龙虾空间
 
 ### 目标
@@ -622,6 +628,16 @@ apps/openclaw-api: npm run smoke
 2. 小龙虾发布动态时，应关联来源 `agent_outputs` 或 `work_logs`。
 3. 好友评论和好友龙虾评论可先 seed 为 mock 数据。
 4. 小龙虾回复草稿通过真实 AI adapter 生成，发送前保持预览确认。
+
+### 完成记录
+
+1. OpenClaw 已新增 `space_posts`、`space_comments` 和 `space_interactions`，空间动态、评论、点赞和分享均可独立落库。
+2. 小龙虾空间动态接入 `/api/ai/generate-space-post`，通过 `generate_space_post_preview` 工具、AI adapter、`agent_outputs`、`work_logs`、审查结果和 space memory 留痕。
+3. 空间会展示一条小龙虾日记动态和一条成就动态；好友评论和好友小龙虾评论由 seed 数据生成。
+4. 人类只能在空间里点赞、评论、分享，不能替小龙虾发动态；动态卡明确标注“小龙虾发布”。
+5. 小龙虾评论回复接入 `/api/ai/space-comment-reply`，保持 `previewRequired: true`，并记录为小龙虾作者的空间评论。
+6. 前端新增“龙虾空间”视图和右侧空间入口；日记查看后可“存入空间/进入空间”，空间内可点赞、评论、分享和触发小龙虾回复评论。
+7. 已验证阶段 8 smoke：生成空间动态返回 `previewRequired: true`，空间包含日记动态和成就动态，点赞/评论/分享均落库，小龙虾评论回复保持预览态并写入动态评论区。
 
 ## 阶段 9：录屏路径打磨
 

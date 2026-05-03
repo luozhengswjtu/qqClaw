@@ -102,8 +102,8 @@
 13. 已新增前端 stream adapter：通过 OpenClaw `/api/ai/chat` 获取输出，再模拟流式分片展示。
 14. 小龙虾消息 UI 已显示生成中、审查中、已完成、fallback 和失败状态。
 15. 第一次小龙虾聊天会完成 `first_lobster_chat` 打卡，并同步调用 OpenClaw checkin API。
-16. 阶段 4 已完成：新手打卡改为 10 步顺序，只显示已完成步骤和当前步骤，完成一步自动解锁下一步。
-17. 阶段 4 已接入 OpenClaw：`checkins` 持久化 10 步状态，完成打卡写入 `work_logs`，奖励写入 `rewards` 和 `achievements`。
+16. 阶段 4 已完成并按最新反馈重构：新手打卡改为 5 个用户可见大步骤，只显示当前步骤，完成一步自动解锁下一步。
+17. 阶段 4 已接入 OpenClaw：`checkins` 持久化 5 个用户可见打卡，完成打卡写入 `work_logs`，奖励写入 `rewards` 和 `achievements`；原 2-7 合并为“处理一次群聊提醒”，内部子动作继续通过权限、工具调用、AI 输出和工作记录留痕。
 18. OpenClaw 不可用时，前端仍会用 Zustand 本地状态推进打卡，保证录屏演示可降级。
 19. 阶段 4 呈现改进已实施：右侧只保留当前引导卡、轻量点状进度和下一奖励预告；完成反馈进入中间聊天流，避免右侧变成调试列表。
 20. 阶段 5 已完成：点击“去设置权限”会在中间聊天流弹出权限设置卡，支持多选具体授权群，并开启主动感知并总结群聊、生成回复草稿；日记素材不在权限卡中提前暴露。
@@ -114,12 +114,18 @@
 25. 回复草稿接入 OpenClaw `/api/ai/reply-draft`，会经过工具注册、权限检查、预览确认审查和 AI adapter，卡片明确标注发送前需要用户确认。
 26. 工作记录接入 OpenClaw `/api/ai/generate-work-log`，返回 AI 文本和最新 `work_logs`，前端以工作记录卡展示。
 27. 阶段 6 的 API 和前端都有 fallback，OpenClaw 或真实 AI 不可用时仍可演示。
+28. 阶段 7 已完成：隐藏日记由 OpenClaw 基于已认养、授权群、@ 信号、群聊总结和回复草稿记录判断触发，不暴露为普通“生成日记”按钮。
+29. 日记生成接入 `/api/ai/generate-diary`、`generate_diary` 工具、AI adapter、`agent_outputs`、`work_logs` 和 diary memory；`/api/diary/hidden-first` 查询状态，`/api/diary/hidden-first/reveal` 记录已查看，避免重复弹出第一次惊喜。
+30. 前端会在条件满足后弹出“队长，我刚刚偷偷写了一篇日记。要看看吗？”惊喜层；点击后回到小龙虾聊天流，展示日记正文和包含形象、金句、今日成就的日记卡，并解锁右侧“日记入口”。
+31. 阶段 8 已完成：OpenClaw 新增 `space_posts`、`space_comments`、`space_interactions`，空间动态、评论、点赞、分享独立落库。
+32. 空间动态通过 `/api/ai/generate-space-post` 生成，关联 `generate_space_post_preview` 工具、AI adapter、`agent_outputs`、`work_logs` 和审查结果；动态只由小龙虾发布。
+33. `/api/space` 返回空间状态；`/api/space/interactions` 记录点赞和分享；`/api/space/comments` 记录人类评论；`/api/ai/space-comment-reply` 生成小龙虾评论回复预览。
+34. 前端新增 `lobster_space` 视图、空间动态卡、右侧“龙虾空间”入口；日记查看后可存入空间，空间里可点赞、评论、分享和触发小龙虾回复评论。
 
-阶段 6 已完成。下一步不要直接堆前端页面，要基于 OpenClaw Agent 底座推进：
+阶段 8 已完成。下一步不要直接堆新功能，要基于 OpenClaw Agent 底座推进：
 
-1. 阶段 7 隐藏日记惊喜。
-2. 小龙虾空间。
-3. 对阶段 3/4/5/6 的三栏主交互、流式体感、打卡节奏、权限卡流程和文本卡片节奏做用户反馈修正。
+1. 阶段 9 录屏路径打磨。
+2. 对阶段 3/4/5/6/7/8 的三栏主交互、流式体感、打卡节奏、权限卡流程、文本卡片节奏、隐藏日记惊喜和小龙虾空间做用户反馈修正。
 
 阶段 4 打卡 UI 原则：
 
@@ -144,9 +150,11 @@ npm run build
 apps/openclaw-api: npm run smoke
 ```
 
-阶段 4 smoke 使用临时 SQLite 库验证过 10 个打卡、第一步完成后自动激活 `first_group_permission`、奖励解锁和工作日志写入。
+阶段 4 smoke 使用临时 SQLite 库验证过 5 个用户可见打卡、第一步完成后自动激活 `first_group_permission`、奖励解锁和工作日志写入。
 
 阶段 5 smoke 使用临时 SQLite 库验证过：未授权群感知阻断、授权后群聊感知卡合并返回摘要和 @ 信号、卡片包含来源消息 `m-002`、授权群总结成功、权限工作日志和 permission memory 写入。
+
+阶段 7 smoke 使用临时 SQLite 库验证过：隐藏日记触发前 `canTrigger: true`，生成后 `triggered: true`，重复调用不重新生成，查看后 `revealed: true` 且 `unlocked: true`。
 
 阶段 6 smoke 使用临时 SQLite 库验证过：回复草稿返回 `previewRequired: true`、保留来源消息 `m-002`、工作记录返回 AI 文本和最新 `work_logs`，并继续写入 `agent_outputs`、`tool_runs`、`review_results` 和 `work_logs`。
 
