@@ -279,6 +279,100 @@ const rewardSeeds = [
   },
 ]
 
+const achievementEventByCheckin = {
+  first_lobster_chat: {
+    event: 'chat.first_message',
+    achievementKey: 'first_claw_touch',
+  },
+  first_group_permission: {
+    event: 'group.first_signal',
+    achievementKey: 'first_group_signal',
+  },
+  first_view_work_log: {
+    event: 'worklog.first_view',
+    achievementKey: 'first_work_log',
+  },
+  first_space_post: {
+    event: 'space.first_post',
+    achievementKey: 'first_space_post',
+  },
+  first_space_comment: {
+    event: 'space.first_comment_reply',
+    achievementKey: 'first_space_reply',
+  },
+}
+
+const achievementByRewardKey = {
+  'tiny-flag': {
+    key: 'first_claw_touch',
+    title: '初次碰钳',
+    description: '你和小龙虾完成了第一次对话，它开始记住你了。',
+    reward: '小红旗挂饰',
+  },
+  'shell-badge': {
+    key: 'first_group_signal',
+    title: '捞到重点',
+    description: '第一次让小龙虾从群聊里捞出值得看的提醒。',
+    reward: '亮晶晶虾壳',
+  },
+  logbook: {
+    key: 'first_work_log',
+    title: '透明小本本',
+    description: '第一次查看小龙虾留下的工作记录。',
+    reward: '透明工作簿',
+  },
+  'space-banner': {
+    key: 'first_space_post',
+    title: '第一条虾动态',
+    description: '小龙虾第一次把值得记录的小事发进龙虾空间。',
+    reward: '龙虾空间头图',
+  },
+  'star-ornament': {
+    key: 'first_space_reply',
+    title: '评论也会回',
+    description: '第一次在龙虾空间里完成评论回复。',
+    reward: '星星挂饰',
+  },
+}
+
+function getAchievementTrigger(checkinKey) {
+  const trigger = achievementEventByCheckin[checkinKey]
+  return trigger ? { checkInId: checkinKey, ...trigger } : null
+}
+
+function getAchievementTriggerForRewardKey(rewardKey) {
+  const achievementKey = achievementByRewardKey[rewardKey]?.key
+  if (!achievementKey) {
+    return null
+  }
+
+  const entry = Object.entries(achievementEventByCheckin).find(
+    ([, trigger]) => trigger.achievementKey === achievementKey,
+  )
+
+  return entry ? { checkInId: entry[0], ...entry[1] } : null
+}
+
+function rewardToAchievement(row, timestamp) {
+  const catalog = achievementByRewardKey[row.key]
+  const achievementId = `achievement-${row.key}`
+  const achievementKey = catalog?.key ?? achievementId
+
+  return {
+    id: achievementId,
+    key: achievementKey,
+    title: catalog?.title ?? row.title,
+    description: catalog?.description ?? row.description,
+    status: 'unlocked',
+    reward: catalog?.reward ?? row.title,
+    hidden: false,
+    hint: '',
+    triggerCheckInId: row.triggerCheckInId,
+    event: row.event,
+    unlockedAt: timestamp,
+  }
+}
+
 function ensureConversationSeedRows(timestamp = nowIso()) {
   const groupRows = [
     ['group-ai-camp', 'AI 创作营 - 小组 7', 'AI', 18],
@@ -2425,6 +2519,7 @@ export function completeCheckin(key, writeLog = true) {
 
   const timestamp = nowIso()
   const wasDone = existing.status === 'done'
+  const achievementTrigger = getAchievementTrigger(key)
   db.prepare(`
     UPDATE checkins
     SET status = 'done',
@@ -2449,16 +2544,36 @@ export function completeCheckin(key, writeLog = true) {
   }
 
   const unlockedRewards = unlockEligibleRewards(timestamp)
+  const newlyUnlockedAchievements = unlockedRewards.map((reward) =>
+    rewardToAchievement(
+      {
+        ...reward,
+        key: reward.id,
+        event: reward.event,
+        triggerCheckInId: reward.triggerCheckInId,
+      },
+      timestamp,
+    ),
+  )
 
   if (writeLog && !wasDone) {
     writeWorkLog('checkin', 'Checkin completed', {
       key,
       nextKey: nextKey || null,
+      achievementEvent: achievementTrigger?.event ?? null,
+      achievementKey: achievementTrigger?.achievementKey ?? null,
       unlockedRewardIds: unlockedRewards.map((reward) => reward.id),
+      unlockedAchievementIds: newlyUnlockedAchievements.map(
+        (achievement) => achievement.id,
+      ),
     })
   }
 
-  return getCheckins()
+  return {
+    checkins: getCheckins(),
+    newlyUnlockedRewards: wasDone ? [] : unlockedRewards,
+    newlyUnlockedAchievements: wasDone ? [] : newlyUnlockedAchievements,
+  }
 }
 
 function unlockEligibleRewards(timestamp = nowIso()) {
@@ -2475,24 +2590,40 @@ function unlockEligibleRewards(timestamp = nowIso()) {
   const unlocked = []
 
   for (const row of rows) {
+    const rewardTrigger = getAchievementTriggerForRewardKey(row.key)
     db.prepare(`
       UPDATE rewards
       SET unlocked_at = ?, updated_at = ?
       WHERE key = ?
     `).run(timestamp, timestamp, row.key)
 
-    const achievementId = `achievement-${row.key}`
+    const achievement = rewardToAchievement(
+      {
+        ...row,
+        event: rewardTrigger?.event,
+        triggerCheckInId: rewardTrigger?.checkInId,
+      },
+      timestamp,
+    )
     db.prepare(`
       INSERT INTO achievements (
         id, reward_key, title, description, unlocked_at
       )
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(id) DO NOTHING
-    `).run(achievementId, row.key, row.title, row.description, timestamp)
+    `).run(
+      achievement.id,
+      row.key,
+      achievement.title,
+      achievement.description,
+      timestamp,
+    )
 
     writeWorkLog('reward', 'Reward unlocked', {
       rewardKey: row.key,
       requiredCheckins: row.required_checkins,
+      achievementEvent: rewardTrigger?.event ?? null,
+      achievementKey: achievement.key,
     })
 
     unlocked.push({
@@ -2502,6 +2633,8 @@ function unlockEligibleRewards(timestamp = nowIso()) {
       requiredCheckIns: row.required_checkins,
       unlocked: true,
       unlockedAt: timestamp,
+      event: rewardTrigger?.event,
+      triggerCheckInId: rewardTrigger?.checkInId,
     })
   }
 

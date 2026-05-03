@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { openclawAiAdapter } from '../ai/openclawAiAdapter'
 import {
   openclawClient,
+  type OpenClawCheckInCompleteOutput,
   type OpenClawSpaceAwarenessEventInput,
 } from '../api/openclawClient'
 import {
@@ -9,13 +10,17 @@ import {
   defaultLobsterProfile,
   lobsterCheckIns,
   messages,
+  mockAchievements,
 } from '../data/mockData'
 import type {
+  Achievement,
+  AchievementMoment,
   GroupPermissionScope,
   Interest,
   LobsterChatLine,
   LobsterDiaryEntry,
   LobsterProfile,
+  LobsterSuggestion,
   LobsterSpaceComment,
   LobsterSpacePost,
   Personality,
@@ -26,6 +31,8 @@ import type {
 } from '../types'
 
 type AppView = 'qq' | 'adoption' | 'lobster_chat' | 'lobster_space'
+
+const achievementMomentStorageKey = 'qqclaw.seenAchievementMomentIds.v1'
 
 interface SourceFocus {
   conversationId: string
@@ -60,6 +67,8 @@ interface LobsterAppState {
   lobsterChatLines: LobsterChatLine[]
   lobsterChatBusy: boolean
   lobsterProfile: LobsterProfile
+  achievementMomentQueue: AchievementMoment[]
+  seenAchievementMomentIds: string[]
   adoptionDraft: AdoptionDraft
   setActiveConversation: (conversationId: string) => void
   discoverLobster: () => void
@@ -97,6 +106,7 @@ interface LobsterAppState {
   commentOnSpacePost: (postId: string, content: string) => Promise<void>
   shareSpacePost: (postId: string) => Promise<void>
   replyToSpaceComment: (postId?: string, commentId?: string) => Promise<void>
+  markAchievementMomentSeen: (momentId: string) => void
   hydrateFromOpenClaw: () => void
 }
 
@@ -122,6 +132,126 @@ function getFirstOpenCheckInId(completedCheckInIds: string[]) {
     lobsterCheckIns[lobsterCheckIns.length - 1]?.id ??
     'first_lobster_chat'
   )
+}
+
+function readSeenAchievementMomentIds() {
+  if (typeof window === 'undefined') {
+    return []
+  }
+
+  try {
+    const parsed = JSON.parse(
+      window.localStorage.getItem(achievementMomentStorageKey) ?? '[]',
+    )
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === 'string')
+      : []
+  } catch {
+    return []
+  }
+}
+
+function writeSeenAchievementMomentIds(ids: string[]) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    window.localStorage.setItem(achievementMomentStorageKey, JSON.stringify(ids))
+  } catch {
+    // Local storage is only used to avoid replaying demo animation.
+  }
+}
+
+function createAchievementMoment(checkInId: string): AchievementMoment | null {
+  if (checkInId !== 'first_lobster_chat') {
+    return null
+  }
+
+  const achievement = mockAchievements.find(
+    (item) => item.triggerCheckInId === checkInId,
+  )
+
+  if (!achievement) {
+    return null
+  }
+
+  return {
+    id: achievement.key,
+    achievementKey: achievement.key,
+    title: achievement.title,
+    description: achievement.description,
+    reward: achievement.reward,
+  }
+}
+
+function createAchievementMomentFromAchievement(
+  achievement: Achievement,
+): AchievementMoment | null {
+  const achievementKey = achievement.key ?? achievement.id
+  const catalogAchievement = mockAchievements.find(
+    (item) => item.key === achievementKey || item.id === achievement.id,
+  )
+
+  if (!catalogAchievement || catalogAchievement.key !== 'first_claw_touch') {
+    return null
+  }
+
+  return {
+    id: catalogAchievement.key,
+    achievementKey: catalogAchievement.key,
+    title: catalogAchievement.title,
+    description: catalogAchievement.description,
+    reward: catalogAchievement.reward,
+  }
+}
+
+function enqueueAchievementMoment(
+  state: LobsterAppState,
+  checkInId: string,
+) {
+  const moment = createAchievementMoment(checkInId)
+
+  if (
+    !moment ||
+    state.seenAchievementMomentIds.includes(moment.id) ||
+    state.achievementMomentQueue.some((item) => item.id === moment.id)
+  ) {
+    return state.achievementMomentQueue
+  }
+
+  return [...state.achievementMomentQueue, moment]
+}
+
+function enqueueAchievementMomentsFromApi(
+  state: LobsterAppState,
+  result: OpenClawCheckInCompleteOutput,
+  fallbackCheckInId: string,
+) {
+  const moments = result.newlyUnlockedAchievements
+    ?.map(createAchievementMomentFromAchievement)
+    .filter((moment): moment is AchievementMoment => Boolean(moment))
+
+  if (!result.newlyUnlockedAchievements) {
+    return enqueueAchievementMoment(state, fallbackCheckInId)
+  }
+
+  const nextMoments = moments ?? []
+
+  if (nextMoments.length === 0) {
+    return state.achievementMomentQueue
+  }
+
+  return nextMoments.reduce((queue, moment) => {
+    if (
+      state.seenAchievementMomentIds.includes(moment.id) ||
+      queue.some((item) => item.id === moment.id)
+    ) {
+      return queue
+    }
+
+    return [...queue, moment]
+  }, state.achievementMomentQueue)
 }
 
 function updateChatLine(
@@ -371,6 +501,7 @@ function createDiaryLine(entry: LobsterDiaryEntry): LobsterChatLine {
       type: 'diary_card',
       entry,
     },
+    suggestions: createDiarySuggestions(),
   }
 }
 
@@ -452,7 +583,7 @@ function createLocalSpacePost(
               ? `刚刚生成了一张新图${event.title ? `：${event.title}` : ''}。我把它记进龙虾空间。`
               : entry
                 ? `我把第一篇日记收进空间了：${entry.quote}`
-                : `${profile.name} 解锁了龙虾空间头图。今天的打卡又往前走了一步。`)
+                : `${profile.name} 解锁了龙虾空间头图。今天又多了一段成长痕迹。`)
   const comments = createLocalSpaceComments(postId)
 
   return {
@@ -565,10 +696,12 @@ async function recordLocalSpaceAwarenessEvent(
           getNextCheckInId('first_space_post') ?? state.currentCheckInId,
         lobsterChatLines: [
           ...state.lobsterChatLines,
-          createSpacePostLine(postedPost, 'mock-fallback', false),
-          ...(state.completedCheckInIds.includes('first_space_post')
-            ? []
-            : [createGuideLine('first_space_post')]),
+          {
+            ...createSpacePostLine(postedPost, 'mock-fallback', false),
+            suggestions: state.completedCheckInIds.includes('first_space_post')
+              ? createSpacePostSuggestions(postedPost.id)
+              : createAchievementSuggestions('first_space_post'),
+          },
         ],
       }))
     }
@@ -608,48 +741,243 @@ async function recordLocalSpaceAwarenessEvent(
         getNextCheckInId('first_space_post') ?? state.currentCheckInId,
       lobsterChatLines: [
         ...state.lobsterChatLines,
-        createSpacePostLine(post, 'local-fallback', false),
-        ...(state.completedCheckInIds.includes('first_space_post')
-          ? []
-          : [createGuideLine('first_space_post')]),
+        {
+          ...createSpacePostLine(post, 'local-fallback', false),
+          suggestions: state.completedCheckInIds.includes('first_space_post')
+            ? createSpacePostSuggestions(post.id)
+            : createAchievementSuggestions('first_space_post'),
+        },
       ],
     }))
   }
 }
 
 function getCheckInFeedback(checkInId: string) {
-  const next = getNextCheckInId(checkInId)
-  const nextTitle = lobsterCheckIns.find((item) => item.id === next)?.title
-
   const feedback: Record<string, string> = {
     first_lobster_chat:
-      '我记住啦，这是我的第一面小红旗。下一步我会先问你要哪些群的权限，不会偷偷看。',
+      '我记住啦，这是我的第一面小红旗。可以看看墙面，也可以让我试着捞群消息。',
     first_group_permission:
-      '第一张群聊总结卡整理好了。卡片里可以继续看来源、展开摘要或写回复草稿；下一步我会把刚才做过的事记下来。',
+      '第一张群聊总结卡整理好了。卡片里可以看来源、展开摘要或写回复草稿。',
     first_view_work_log:
-      '工作记录已经留下了。接下来如果我感知到值得记录的小节点，会自己发进龙虾空间。',
+      '工作记录已经留下了。如果我感知到值得记录的小节点，会自己发进龙虾空间。',
     first_space_post:
-      '空间动态已经由我自己发进龙虾空间。最后一步，我们试试在龙虾空间里回复一次评论。',
+      '空间动态已经由我自己发进龙虾空间。可以进去看看互动。',
     first_space_comment:
-      '新手打卡完成。我会慢慢变成更可靠的 QQ 小伙伴。',
+      '首批成长线索都点亮了。我会慢慢变成更可靠的 QQ 小伙伴。',
   }
 
-  const currentFeedback = feedback[checkInId] ?? '这一步完成啦。'
-
-  return nextTitle && checkInId !== 'first_space_comment'
-    ? `${currentFeedback} 接下来是：${nextTitle}。`
-    : currentFeedback
+  return feedback[checkInId] ?? '这件事我记住了。'
 }
 
-function createGuideLine(checkInId: string): LobsterChatLine {
-  return {
-    id: `guide-${checkInId}-${Date.now()}`,
-    role: 'lobster',
-    content: getCheckInFeedback(checkInId),
-    createdAt: new Date().toISOString(),
-    status: 'complete',
-    source: 'mock-fallback',
+function addFeedbackPayload(
+  suggestions: LobsterSuggestion[],
+  checkInId: string,
+) {
+  const feedback = getCheckInFeedback(checkInId)
+  return suggestions.map((suggestion) => ({
+    ...suggestion,
+    payload: {
+      ...suggestion.payload,
+      completedCheckInId: checkInId,
+      feedback,
+    },
+  }))
+}
+
+function createAchievementSuggestions(checkInId: string): LobsterSuggestion[] {
+  if (checkInId === 'first_lobster_chat') {
+    return addFeedbackPayload(
+      [
+        {
+          id: 'view-achievement-wall',
+          label: '看看成就墙',
+          action: 'open_view',
+          payload: { view: 'lobster_chat' },
+        },
+        {
+          id: 'keep-chatting',
+          label: '继续聊天',
+          action: 'send_message',
+          payload: { content: '我们继续聊聊你刚刚记住的事。' },
+        },
+        {
+          id: 'summarize-group',
+          label: '捞群消息',
+          action: 'run_capability',
+          payload: { capability: 'summarize_group' },
+        },
+      ],
+      checkInId,
+    )
   }
+
+  if (checkInId === 'first_group_permission') {
+    return addFeedbackPayload(
+      [
+        {
+          id: 'return-group',
+          label: '回到原群',
+          action: 'open_view',
+          payload: { view: 'qq' },
+        },
+        {
+          id: 'reply-draft',
+          label: '写回复草稿',
+          action: 'run_capability',
+          payload: { capability: 'reply_draft' },
+        },
+        {
+          id: 'work-log',
+          label: '记录这次',
+          action: 'run_capability',
+          payload: { capability: 'work_log' },
+        },
+      ],
+      checkInId,
+    )
+  }
+
+  if (checkInId === 'first_view_work_log') {
+    return addFeedbackPayload(
+      [
+        {
+          id: 'ask-work-log',
+          label: '刚做了什么',
+          action: 'send_message',
+          payload: { content: '你刚刚帮我做了什么？' },
+        },
+        {
+          id: 'space-post',
+          label: '生成动态',
+          action: 'run_capability',
+          payload: { capability: 'space_post' },
+        },
+        {
+          id: 'permission-scope',
+          label: '权限范围',
+          action: 'run_capability',
+          payload: { capability: 'request_permissions' },
+        },
+      ],
+      checkInId,
+    )
+  }
+
+  if (checkInId === 'first_space_post') {
+    return addFeedbackPayload(
+      [
+        {
+          id: 'space-comment',
+          label: '预览评论',
+          action: 'run_capability',
+          payload: { capability: 'space_comment' },
+        },
+        {
+          id: 'open-space',
+          label: '进龙虾空间',
+          action: 'open_view',
+          payload: { view: 'lobster_space' },
+        },
+        {
+          id: 'ask-unlocks',
+          label: '解锁了什么',
+          action: 'send_message',
+          payload: { content: '今天解锁了什么？' },
+        },
+      ],
+      checkInId,
+    )
+  }
+
+  return addFeedbackPayload(
+    [
+      {
+        id: 'open-space',
+        label: '进龙虾空间',
+        action: 'open_view',
+        payload: { view: 'lobster_space' },
+      },
+      {
+        id: 'view-achievement-wall',
+        label: '看成就墙',
+        action: 'open_view',
+        payload: { view: 'lobster_chat' },
+      },
+      {
+        id: 'keep-chatting',
+        label: '继续聊天',
+        action: 'send_message',
+        payload: { content: '我们继续聊聊你刚刚记住的事。' },
+      },
+    ],
+    checkInId,
+  )
+}
+
+function createChatSuggestions(state: LobsterAppState): LobsterSuggestion[] {
+  if (!state.completedCheckInIds.includes('first_lobster_chat')) {
+    return createAchievementSuggestions('first_lobster_chat')
+  }
+
+  if (!state.completedCheckInIds.includes('first_group_permission')) {
+    return createAchievementSuggestions('first_lobster_chat')
+  }
+
+  if (!state.completedCheckInIds.includes('first_view_work_log')) {
+    return createAchievementSuggestions('first_group_permission')
+  }
+
+  if (state.spacePosts.length === 0) {
+    return createAchievementSuggestions('first_view_work_log')
+  }
+
+  return createAchievementSuggestions('first_space_post')
+}
+
+function createSpacePostSuggestions(postId?: string): LobsterSuggestion[] {
+  return [
+    {
+      id: 'space-comment',
+      label: '预览评论',
+      action: 'run_capability',
+      payload: { capability: 'space_comment', postId },
+    },
+    {
+      id: 'open-space',
+      label: '进龙虾空间',
+      action: 'open_view',
+      payload: { view: 'lobster_space' },
+    },
+    {
+      id: 'ask-unlocks',
+      label: '解锁了什么',
+      action: 'send_message',
+      payload: { content: '今天解锁了什么？' },
+    },
+  ]
+}
+
+function createDiarySuggestions(): LobsterSuggestion[] {
+  return [
+    {
+      id: 'space-post',
+      label: '收进空间',
+      action: 'run_capability',
+      payload: { capability: 'space_post' },
+    },
+    {
+      id: 'diary-image',
+      label: '生成卡片',
+      action: 'run_capability',
+      payload: { capability: 'diary_image' },
+    },
+    {
+      id: 'ask-unlocks',
+      label: '解锁了什么',
+      action: 'send_message',
+      payload: { content: '今天解锁了什么？' },
+    },
+  ]
 }
 
 export const useLobsterStore = create<LobsterAppState>((set, get) => ({
@@ -672,6 +1000,8 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
   lobsterChatLines: [],
   lobsterChatBusy: false,
   lobsterProfile: defaultLobsterProfile,
+  achievementMomentQueue: [],
+  seenAchievementMomentIds: readSeenAchievementMomentIds(),
   adoptionDraft: initialAdoptionDraft,
 
   setActiveConversation: (conversationId) => {
@@ -781,7 +1111,14 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
         currentCheckInId: getNextCheckInId(checkInId) ?? state.currentCheckInId,
         lobsterChatLines: alreadyDone
           ? state.lobsterChatLines
-          : [...state.lobsterChatLines, createGuideLine(checkInId)],
+          : state.lobsterChatLines.map((line, index, lines) =>
+              index === lines.length - 1 && line.role === 'lobster'
+                ? {
+                    ...line,
+                    suggestions: createAchievementSuggestions(checkInId),
+                  }
+                : line,
+            ),
       }
     })
 
@@ -803,10 +1140,19 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
                 : state.completedCheckInIds,
             currentCheckInId:
               activeCheckIn?.key ?? getFirstOpenCheckInId(completedCheckInIds),
+            achievementMomentQueue: enqueueAchievementMomentsFromApi(
+              state,
+              result,
+              checkInId,
+            ),
           }
         })
       })
-      .catch(() => undefined)
+      .catch(() => {
+        set((state) => ({
+          achievementMomentQueue: enqueueAchievementMoment(state, checkInId),
+        }))
+      })
   },
 
   requestGroupPermissions: () => {
@@ -1049,6 +1395,7 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
           type: 'summary_card',
           groups,
         },
+        suggestions: createAchievementSuggestions('first_group_permission'),
       }),
     }))
 
@@ -1161,6 +1508,7 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
           previewRequired: true,
           source: cardSource,
         },
+        suggestions: createAchievementSuggestions('first_group_permission'),
       }),
     }))
 
@@ -1242,6 +1590,7 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
           outputId,
           source: cardSource,
         },
+        suggestions: createAchievementSuggestions('first_view_work_log'),
       }),
     }))
 
@@ -1477,8 +1826,10 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
           source: source === 'real-ai' ? 'real-ai' : 'mock-fallback',
           outputId: post.sourceOutputId ?? undefined,
         }),
-        createSpacePostLine(post, source),
-        createGuideLine('first_space_post'),
+        {
+          ...createSpacePostLine(post, source),
+          suggestions: createAchievementSuggestions('first_space_post'),
+        },
       ],
     }))
   },
@@ -1670,16 +2021,33 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
 
     set((state) => ({
       lobsterChatBusy: false,
-      lobsterChatLines: [
-        ...updateChatLine(state.lobsterChatLines, lineId, {
+      lobsterChatLines: updateChatLine(state.lobsterChatLines, lineId, {
           content: '评论回复预览写好了，也已经放进空间评论区用于演示。',
           status: 'complete',
           source: source === 'real-ai' ? 'real-ai' : 'mock-fallback',
           outputId: reply.sourceOutputId ?? undefined,
-        }),
-        createGuideLine('first_space_comment'),
-      ],
+        suggestions: createAchievementSuggestions('first_space_comment'),
+      }),
     }))
+  },
+
+  markAchievementMomentSeen: (momentId) => {
+    set((state) => {
+      const seenAchievementMomentIds = state.seenAchievementMomentIds.includes(
+        momentId,
+      )
+        ? state.seenAchievementMomentIds
+        : [...state.seenAchievementMomentIds, momentId]
+
+      writeSeenAchievementMomentIds(seenAchievementMomentIds)
+
+      return {
+        achievementMomentQueue: state.achievementMomentQueue.filter(
+          (moment) => moment.id !== momentId,
+        ),
+        seenAchievementMomentIds,
+      }
+    })
   },
 
   sendLobsterChatMessage: async (rawContent, context) => {
@@ -1789,16 +2157,16 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
           currentCheckInId: firstChatDone
             ? state.currentCheckInId
             : getNextCheckInId('first_lobster_chat') ?? state.currentCheckInId,
-          lobsterChatLines: [
-            ...updateChatLine(
-              state.lobsterChatLines,
-              lobsterLineId,
-              {
-                status: line?.source === 'mock-fallback' ? 'fallback' : 'complete',
-              },
-            ),
-            ...(firstChatDone ? [] : [createGuideLine('first_lobster_chat')]),
-          ],
+          lobsterChatLines: updateChatLine(
+            state.lobsterChatLines,
+            lobsterLineId,
+            {
+              status: line?.source === 'mock-fallback' ? 'fallback' : 'complete',
+              suggestions: firstChatDone
+                ? createChatSuggestions(state)
+                : createAchievementSuggestions('first_lobster_chat'),
+            },
+          ),
         }
       })
 
@@ -1822,10 +2190,22 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
                 currentCheckInId:
                   activeCheckIn?.key ??
                   getFirstOpenCheckInId(completedCheckInIds),
+                achievementMomentQueue: enqueueAchievementMomentsFromApi(
+                  state,
+                  result,
+                  'first_lobster_chat',
+                ),
               }
             })
           })
-          .catch(() => undefined)
+          .catch(() => {
+            set((state) => ({
+              achievementMomentQueue: enqueueAchievementMoment(
+                state,
+                'first_lobster_chat',
+              ),
+            }))
+          })
       }
     } catch {
       set((state) => ({
@@ -1854,6 +2234,7 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
           const activeCheckIn = bootstrap.checkins.find(
             (item) => item.status === 'active',
           )
+          const seenAchievementMomentIds = readSeenAchievementMomentIds()
           const restoredSummaryLine =
             state.lobsterChatLines.length === 0
               ? createRestoredSummaryLine(
@@ -1888,6 +2269,7 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
             spacePosts: bootstrap.space?.posts ?? state.spacePosts,
             spaceUnlocked:
               (bootstrap.space?.posts.length ?? 0) > 0 || state.spaceUnlocked,
+            seenAchievementMomentIds,
             lobsterChatLines: restoredSummaryLine
               ? [restoredSummaryLine]
               : state.lobsterChatLines,

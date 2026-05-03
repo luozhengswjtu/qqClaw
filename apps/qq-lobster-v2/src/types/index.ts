@@ -263,6 +263,14 @@ export interface LobsterChatLine {
   source?: 'real-ai' | 'mock-fallback'
   outputId?: string
   card?: LobsterChatCard
+  suggestions?: LobsterSuggestion[]
+}
+
+export interface LobsterSuggestion {
+  id: string
+  label: string
+  action: 'send_message' | 'open_view' | 'run_capability'
+  payload?: Record<string, unknown>
 }
 
 export interface CheckInItem {
@@ -282,11 +290,35 @@ export interface CapabilityCard {
   sourceMessageId?: string
 }
 
+export type AchievementStatus = 'locked' | 'unlocked'
+
 export interface Achievement {
   id: string
   title: string
   description: string
-  unlockedAt?: string
+  key?: string
+  status?: AchievementStatus
+  reward?: string
+  hidden?: boolean
+  hint?: string
+  triggerCheckInId?: string
+  unlockedAt?: string | null
+}
+
+export interface AchievementCatalogItem extends Achievement {
+  key: string
+  status: AchievementStatus
+  reward: string
+  hidden: boolean
+  hint: string
+}
+
+export interface AchievementMoment {
+  id: string
+  achievementKey: string
+  title: string
+  description: string
+  reward: string
 }
 
 export interface LobsterReward {

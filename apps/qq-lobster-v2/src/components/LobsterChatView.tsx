@@ -13,7 +13,6 @@ import {
   Settings,
   Smile,
   Sparkles,
-  Target,
   Trophy,
   Users,
   Image as ImageIcon,
@@ -21,10 +20,8 @@ import {
 import {
   conversations,
   currentUser,
-  interestOptions,
-  lobsterCheckIns,
   lobsterRewards,
-  personalityOptions,
+  mockAchievements,
 } from '../data/mockData'
 import { useLobsterStore } from '../store/useLobsterStore'
 import type {
@@ -32,11 +29,13 @@ import type {
   LobsterChatLine,
   LobsterChatContext,
   LobsterDiaryEntry,
+  LobsterSuggestion,
   LobsterSpacePost,
   QQMessage,
   SummaryCardGroup,
   WorkLogEntry,
 } from '../types'
+import { AchievementMomentOverlay } from './AchievementMomentOverlay'
 import { LobsterAvatar } from './LobsterAvatar'
 
 const chatStatusLabel: Record<
@@ -50,6 +49,8 @@ const chatStatusLabel: Record<
   fallback: 'fallback',
   failed: '失败',
 }
+
+type RightPanelTab = 'achievements' | 'accessories' | 'diary'
 
 function toContextMessage(message: QQMessage) {
   return {
@@ -765,6 +766,11 @@ export function LobsterChatView() {
   const [selectedSpacePostId, setSelectedSpacePostId] = useState<string | null>(
     null,
   )
+  const [selectedAchievementKey, setSelectedAchievementKey] = useState(
+    'first_claw_touch',
+  )
+  const [rightPanelTab, setRightPanelTab] =
+    useState<RightPanelTab>('achievements')
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const lobsterProfile = useLobsterStore((state) => state.lobsterProfile)
   const chatLines = useLobsterStore((state) => state.lobsterChatLines)
@@ -775,18 +781,18 @@ export function LobsterChatView() {
   const diaryUnlocked = useLobsterStore((state) => state.diaryUnlocked)
   const diaryEntries = useLobsterStore((state) => state.diaryEntries)
   const spacePosts = useLobsterStore((state) => state.spacePosts)
-  const spaceUnlocked = useLobsterStore((state) => state.spaceUnlocked)
   const appView = useLobsterStore((state) => state.appView)
-  const currentCheckInId = useLobsterStore((state) => state.currentCheckInId)
+  const activeAchievementMoment = useLobsterStore(
+    (state) => state.achievementMomentQueue[0],
+  )
+  const markAchievementMomentSeen = useLobsterStore(
+    (state) => state.markAchievementMomentSeen,
+  )
   const completedCheckInIds = useLobsterStore(
     (state) => state.completedCheckInIds,
   )
   const sendLobsterChatMessage = useLobsterStore(
     (state) => state.sendLobsterChatMessage,
-  )
-  const completeCheckIn = useLobsterStore((state) => state.completeCheckIn)
-  const requestGroupPermissions = useLobsterStore(
-    (state) => state.requestGroupPermissions,
   )
   const saveGroupPermissions = useLobsterStore(
     (state) => state.saveGroupPermissions,
@@ -796,7 +802,9 @@ export function LobsterChatView() {
   )
   const openSummarySource = useLobsterStore((state) => state.openSummarySource)
   const requestReplyDraft = useLobsterStore((state) => state.requestReplyDraft)
-  const generateWorkLog = useLobsterStore((state) => state.generateWorkLog)
+  const requestGroupPermissions = useLobsterStore(
+    (state) => state.requestGroupPermissions,
+  )
   const openHiddenDiary = useLobsterStore((state) => state.openHiddenDiary)
   const generateHiddenDiaryImage = useLobsterStore(
     (state) => state.generateHiddenDiaryImage,
@@ -805,6 +813,7 @@ export function LobsterChatView() {
   const openLobsterChat = useLobsterStore((state) => state.openLobsterChat)
   const openLobsterSpace = useLobsterStore((state) => state.openLobsterSpace)
   const generateSpacePost = useLobsterStore((state) => state.generateSpacePost)
+  const generateWorkLog = useLobsterStore((state) => state.generateWorkLog)
   const likeSpacePost = useLobsterStore((state) => state.likeSpacePost)
   const commentOnSpacePost = useLobsterStore(
     (state) => state.commentOnSpacePost,
@@ -814,34 +823,45 @@ export function LobsterChatView() {
     (state) => state.replyToSpaceComment,
   )
   const completedCount = completedCheckInIds.length
-  const currentCheckIn = lobsterCheckIns.find(
-    (item) => item.id === currentCheckInId,
-  )
-  const activeCheckIn =
-    currentCheckIn && !completedCheckInIds.includes(currentCheckIn.id)
-      ? currentCheckIn
-      : undefined
-  const nextReward = lobsterRewards.find(
-    (reward) => completedCount < reward.requiredCheckIns,
-  )
   const lastReward = [...lobsterRewards]
     .reverse()
     .find((reward) => completedCount >= reward.requiredCheckIns)
-  const progressPercent = Math.round(
-    (completedCount / lobsterCheckIns.length) * 100,
+  const unlockedRewards = lobsterRewards.filter(
+    (reward) => completedCount >= reward.requiredCheckIns,
   )
-  const guideActionLabel: Record<string, string> = {
-    first_group_permission: '处理群聊提醒',
-    first_view_work_log: '查看工作记录',
-    first_space_post: '进入龙虾空间',
-    first_space_comment: '回复空间评论',
-  }
-  const personalityLabel =
-    personalityOptions.find((item) => item.id === lobsterProfile.personality)
-      ?.label ?? '社恐观察'
-  const interestLabels = lobsterProfile.interests
-    .map((interest) => interestOptions.find((item) => item.id === interest)?.label)
-    .filter((label): label is string => Boolean(label))
+  const unlockedAchievementKeys = new Set(
+    mockAchievements
+      .filter((achievement) =>
+        completedCheckInIds.includes(achievement.triggerCheckInId ?? ''),
+      )
+      .map((achievement) => achievement.key),
+  )
+  const visibleAchievements = mockAchievements.slice(0, 5)
+  const unlockedAchievements = mockAchievements.filter((achievement) =>
+    unlockedAchievementKeys.has(achievement.key),
+  )
+  const latestAchievement = [...unlockedAchievements].reverse()[0]
+  const selectedAchievement =
+    visibleAchievements.find(
+      (achievement) => achievement.key === selectedAchievementKey,
+    ) ?? visibleAchievements[0]
+  const selectedAchievementUnlocked = selectedAchievement
+    ? unlockedAchievementKeys.has(selectedAchievement.key)
+    : false
+  const tinyFlagUnlocked = completedCheckInIds.includes('first_lobster_chat')
+  const equippedAccessory = lastReward?.title ?? '还没佩戴挂饰'
+  const moodLine = latestAchievement
+    ? `刚刚点亮「${latestAchievement.title}」`
+    : chatLines.length > 0
+      ? '正在记住你说过的话'
+      : '等你来碰一碰钳子'
+  const rightPanelTabs: Array<{ id: RightPanelTab; label: string }> = [
+    { id: 'achievements', label: '成就' },
+    { id: 'accessories', label: '挂饰' },
+    ...(diaryUnlocked ? [{ id: 'diary' as const, label: '日记' }] : []),
+  ]
+  const activeRightPanelTab =
+    rightPanelTab === 'diary' && !diaryUnlocked ? 'achievements' : rightPanelTab
   const effectiveSelectedSpacePostId =
     selectedSpacePostId &&
     spacePosts.some((post) => post.id === selectedSpacePostId)
@@ -868,32 +888,103 @@ export function LobsterChatView() {
     await sendLobsterChatMessage(content)
   }
 
-  function completeCurrentGuide() {
-    if (!activeCheckIn || activeCheckIn.id === 'first_lobster_chat') {
+  function handleSuggestionClick(suggestion: LobsterSuggestion) {
+    const payload = suggestion.payload ?? {}
+
+    if (suggestion.action === 'send_message') {
+      const content =
+        typeof payload.content === 'string' ? payload.content : suggestion.label
+      void sendLobsterChatMessage(content)
       return
     }
 
-    if (activeCheckIn.id === 'first_group_permission') {
-      requestGroupPermissions()
+    if (suggestion.action === 'open_view') {
+      if (payload.view === 'lobster_space') {
+        void openLobsterSpace()
+        return
+      }
+
+      if (payload.view === 'qq') {
+        setActiveConversation(conversations[0]?.id ?? 'group-ai-camp')
+        return
+      }
+
+      openLobsterChat()
       return
     }
 
-    if (activeCheckIn.id === 'first_view_work_log') {
+    if (suggestion.action !== 'run_capability') {
+      return
+    }
+
+    if (payload.capability === 'summarize_group') {
+      void saveGroupPermissions(
+        {
+          summarizeGroup: true,
+          collectMentions: true,
+          draftReply: true,
+          diaryMaterial: true,
+          groupId: conversations[0]?.id ?? 'group-ai-camp',
+        },
+        [conversations[0]?.id ?? 'group-ai-camp'],
+      )
+      return
+    }
+
+    if (payload.capability === 'reply_draft') {
+      void requestReplyDraft()
+      return
+    }
+
+    if (payload.capability === 'work_log') {
       void generateWorkLog()
       return
     }
 
-    if (activeCheckIn.id === 'first_space_post') {
-      void openLobsterSpace()
+    if (payload.capability === 'space_post') {
+      void generateSpacePost()
       return
     }
 
-    if (activeCheckIn.id === 'first_space_comment') {
-      void replyToSpaceComment()
+    if (payload.capability === 'space_comment') {
+      void replyToSpaceComment(
+        typeof payload.postId === 'string' ? payload.postId : undefined,
+      )
       return
     }
 
-    completeCheckIn(activeCheckIn.id)
+    if (payload.capability === 'request_permissions') {
+      requestGroupPermissions()
+      return
+    }
+
+    if (payload.capability === 'diary_image') {
+      void generateHiddenDiaryImage()
+    }
+  }
+
+  function renderLineSuggestions(line: LobsterChatLine) {
+    const suggestions = line.suggestions?.slice(0, 3) ?? []
+
+    if (suggestions.length === 0) {
+      return null
+    }
+
+    return (
+      <div className="flex flex-wrap gap-2 pt-1">
+        {suggestions.map((suggestion) => (
+          <button
+            className="inline-flex h-8 items-center rounded-lg bg-white px-3 text-xs font-semibold text-qq-700 ring-1 ring-qq-100 transition hover:bg-qq-50 disabled:cursor-not-allowed disabled:text-slate-300 disabled:ring-slate-100"
+            disabled={sending}
+            key={suggestion.id}
+            type="button"
+            onClick={() => handleSuggestionClick(suggestion)}
+          >
+            {suggestion.label}
+          </button>
+        ))}
+      </div>
+    )
   }
 
   function renderLineCard(line: LobsterChatLine) {
@@ -1062,7 +1153,7 @@ export function LobsterChatView() {
               ))
             ) : (
               <div className="rounded-lg border border-dashed border-qq-200 bg-white px-5 py-6 text-sm leading-6 text-ink-600">
-                空间还没有动态。先从右侧打卡生成一条小龙虾自己的空间动态。
+                空间还没有动态。可以让小龙虾记录一件适合公开的小事。
               </div>
             )}
           </div>
@@ -1105,12 +1196,18 @@ export function LobsterChatView() {
 
   return (
     <>
-    {diarySurpriseVisible ? (
-      <HiddenDiarySurprise
-        lobsterName={lobsterProfile.name}
-        onOpen={() => void openHiddenDiary()}
-      />
-    ) : null}
+      {diarySurpriseVisible ? (
+        <HiddenDiarySurprise
+          lobsterName={lobsterProfile.name}
+          onOpen={() => void openHiddenDiary()}
+        />
+      ) : null}
+      {activeAchievementMoment ? (
+        <AchievementMomentOverlay
+          moment={activeAchievementMoment}
+          onDone={markAchievementMomentSeen}
+        />
+      ) : null}
     <div className="flex h-screen min-h-[680px] bg-[#edf3fb] p-4 text-ink-900">
       <div className="mx-auto grid h-full min-h-0 w-full max-w-[1440px] grid-cols-[74px_minmax(220px,280px)_minmax(520px,1fr)_340px] overflow-hidden rounded-lg border border-white/80 bg-white shadow-panel">
         <aside className="flex flex-col items-center justify-between bg-[#e8f2ff] px-3 py-4">
@@ -1301,14 +1398,10 @@ export function LobsterChatView() {
             <div className="flex gap-3 text-left">
               <LobsterAvatar size="sm" mood="curious" />
               <div className="max-w-[72%] rounded-lg border border-qq-100 bg-qq-50 px-4 py-3 text-sm leading-6 text-qq-700">
-                {activeCheckIn
-                  ? `当前可打卡：${activeCheckIn.title}。`
-                  : '新手打卡已经全部完成。'}
-                {activeCheckIn?.id === 'first_lobster_chat'
-                  ? '和我说第一句话，完成后会解锁第一个小奖励。'
-                  : activeCheckIn
-                    ? '右侧操作完成后，会自动解锁下一步。'
-                    : '奖励和工作记录会继续保留。'}
+                {latestAchievement
+                  ? `刚点亮「${latestAchievement.title}」。`
+                  : '成就墙还在等第一束光。'}
+                已点亮的徽章会留在右侧墙面里。
               </div>
             </div>
 
@@ -1331,6 +1424,7 @@ export function LobsterChatView() {
                       {line.content || '我正在组织语言...'}
                     </div>
                     {renderLineCard(line)}
+                    {renderLineSuggestions(line)}
                     <div className="flex flex-wrap items-center gap-2 text-xs text-ink-500">
                       <span>
                         OpenClaw: {line.source ?? '连接中'}
@@ -1395,225 +1489,237 @@ export function LobsterChatView() {
 
         <aside className="min-h-0 overflow-hidden border-l border-slate-100 bg-white">
           <div className="scrollbar-thin h-full overflow-y-auto px-5 py-5">
-            <div className="rounded-lg bg-lobster-50 p-5 text-center">
-              <LobsterAvatar size="lg" mood="happy" animated />
-              <p className="mt-3 text-base font-semibold text-ink-900">
-                {lobsterProfile.name}
-              </p>
-              <p className="mt-1 text-xs text-ink-500">
-                {personalityLabel} · Lv.{lobsterProfile.level}
-              </p>
-              <div className="mt-4 flex flex-wrap justify-center gap-2">
-                {interestLabels.map((label) => (
-                  <span
-                    className="rounded bg-white px-2 py-1 text-xs text-ink-500"
-                    key={label}
-                  >
-                    {label}
-                  </span>
-                ))}
-              </div>
-            </div>
-
-            <section className="mt-5 rounded-lg border border-slate-200 bg-slate-50 px-4 py-4">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 text-lobster-500" />
-                  <p className="text-sm font-semibold text-ink-900">当前状态</p>
-                </div>
-                <span className="rounded bg-white px-2 py-1 text-xs text-ink-500">
-                  {sending ? '生成中' : '待聊天'}
-                </span>
-              </div>
-              <p className="mt-2 text-xs leading-5 text-ink-500">
-                小龙虾私聊会先经过 OpenClaw。低风险闲聊直接进入聊天流，后续卡片和动作会在审查后再开放操作。
-              </p>
-            </section>
-
-            {diaryUnlocked && diaryEntries.length > 0 ? (
-              <section className="mt-5 rounded-lg border border-lobster-100 bg-[#fff7e8] px-4 py-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-lobster-600" />
-                    <p className="text-sm font-semibold text-ink-900">日记入口</p>
-                  </div>
-                  <span className="rounded bg-white px-2 py-1 text-xs text-lobster-700">
-                    {diaryEntries.length} 篇
-                  </span>
-                </div>
-                <p className="mt-2 line-clamp-2 text-xs leading-5 text-ink-600">
-                  {diaryEntries[0].quote}
-                </p>
-                <button
-                  className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-lobster-700 ring-1 ring-lobster-100 transition hover:bg-lobster-50"
-                  type="button"
-                  onClick={openDiaryHistory}
-                >
-                  <FileText className="h-3.5 w-3.5" />
-                  查看历史日记
-                </button>
-              </section>
-            ) : null}
-
-            {diaryUnlocked || spaceUnlocked ? (
-              <section className="mt-5 rounded-lg border border-qq-100 bg-white px-4 py-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <Share2 className="h-4 w-4 text-qq-600" />
-                    <p className="text-sm font-semibold text-ink-900">
-                      龙虾空间
-                    </p>
-                  </div>
-                  <span className="rounded bg-qq-50 px-2 py-1 text-xs text-qq-700">
-                    {spacePosts.length} 条
-                  </span>
-                </div>
-                <p className="mt-2 text-xs leading-5 text-ink-500">
-                  空间动态由小龙虾自己发布。你可以访问、点赞、评论和分享。
-                </p>
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <button
-                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-qq-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-qq-600 disabled:cursor-not-allowed disabled:bg-slate-300"
-                    type="button"
-                    disabled={sending}
-                    onClick={() =>
-                      spacePosts.length > 0
-                        ? void openLobsterSpace()
-                        : void generateSpacePost()
-                    }
-                  >
-                    <Sparkles className="h-3.5 w-3.5" />
-                    {spacePosts.length > 0 ? '进入空间' : '存入空间'}
-                  </button>
-                  <button
-                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-ink-600 transition hover:bg-qq-50 hover:text-qq-700 disabled:cursor-not-allowed disabled:text-slate-300"
-                    type="button"
-                    disabled={!selectedSpacePost || sending}
-                    onClick={() => void replyToSpaceComment(selectedSpacePost?.id)}
-                  >
-                    <MessageSquare className="h-3.5 w-3.5" />
-                    回复评论
-                  </button>
-                </div>
-              </section>
-            ) : null}
-
-            <section className="mt-5 rounded-lg border border-qq-100 bg-qq-50 px-4 py-4">
-              <div className="flex items-center gap-2">
-                <Target className="h-4 w-4 text-qq-600" />
-                <p className="text-sm font-semibold text-ink-900">
-                  今天先学会一件事
-                </p>
-              </div>
-
-              <div className="mt-4 rounded-lg border border-white/80 bg-white px-4 py-4 shadow-sm">
-                {activeCheckIn ? (
-                  <>
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-semibold text-qq-700">
-                          {activeCheckIn.title}
-                        </p>
-                        <p className="mt-1 text-xs leading-5 text-ink-500">
-                          {activeCheckIn.description}
-                        </p>
-                      </div>
-                      <span className="shrink-0 rounded bg-qq-50 px-2 py-1 text-xs font-medium text-qq-700">
-                        {completedCount + 1}/{lobsterCheckIns.length}
+            <section className="rounded-lg border border-qq-100 bg-qq-50 px-4 py-4">
+              <div className="flex items-center gap-3">
+                <div className="relative shrink-0">
+                  <LobsterAvatar size="md" mood={lobsterProfile.mood} animated />
+                  {tinyFlagUnlocked ? (
+                    <span
+                      className="absolute -right-1 top-0 flex h-9 w-7 origin-bottom-left -rotate-6 items-start justify-center"
+                      aria-label="小红旗挂饰"
+                      title="小红旗挂饰"
+                    >
+                      <span className="h-8 w-0.5 rounded-full bg-amber-700" />
+                      <span className="absolute left-3 top-0 h-4 w-5 rounded-r-sm bg-red-500 shadow-sm">
+                        <span className="absolute inset-y-0 left-0 w-1 bg-red-600" />
                       </span>
-                    </div>
-                    {activeCheckIn.id === 'first_lobster_chat' ? (
-                      <p className="mt-4 rounded-lg bg-lobster-50 px-3 py-2 text-xs leading-5 text-lobster-600">
-                        从中间输入框和我说一句话就能完成。
-                      </p>
-                    ) : (
-                      <button
-                        className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-qq-500 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-qq-600"
-                        type="button"
-                        onClick={completeCurrentGuide}
-                      >
-                        <Sparkles className="h-4 w-4" />
-                        {guideActionLabel[activeCheckIn.id] ?? '完成这一步'}
-                      </button>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <p className="text-sm font-semibold text-emerald-700">
-                      新手打卡完成
+                    </span>
+                  ) : null}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className="truncate text-sm font-semibold text-ink-900">
+                      {lobsterProfile.name} 正在成长
                     </p>
-                    <p className="mt-1 text-xs leading-5 text-ink-500">
-                      打卡奖励和工作记录都会保留，后续可以继续扩展能力。
-                    </p>
-                  </>
-                )}
+                    <span className="shrink-0 rounded bg-white px-2 py-0.5 text-xs text-qq-700">
+                      Lv.{lobsterProfile.level}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs leading-5 text-ink-500">
+                    {moodLine}
+                  </p>
+                </div>
               </div>
 
-              <div className="mt-4">
-                <div className="flex items-center justify-between text-xs text-ink-500">
-                  <span>打卡进度</span>
-                  <span>{completedCount}/{lobsterCheckIns.length}</span>
-                </div>
-                <div className="mt-2 h-2 overflow-hidden rounded-full bg-white">
-                  <div
-                    className="h-full rounded-full bg-qq-500 transition-all"
-                    style={{ width: `${progressPercent}%` }}
-                  />
-                </div>
-                <div className="mt-3 flex items-center gap-1.5">
-                  {lobsterCheckIns.map((item, index) => {
-                    const done = completedCheckInIds.includes(item.id)
-                    const active = item.id === activeCheckIn?.id
-                    const label = `${index + 1}. ${item.title}`
-                    return (
-                      <span
-                        aria-label={label}
-                        className={[
-                          'h-2.5 w-2.5 rounded-full transition',
-                          done
-                            ? 'bg-emerald-400'
-                            : active
-                              ? 'bg-qq-500 ring-4 ring-qq-100'
-                              : 'bg-white ring-1 ring-slate-200',
-                        ].join(' ')}
-                        key={item.id}
-                        title={label}
-                      />
-                    )
-                  })}
-                </div>
+              <div className="mt-4 rounded-lg bg-white px-3 py-3">
+                <p className="text-xs text-ink-500">当前佩戴</p>
+                <p className="mt-1 truncate text-sm font-semibold text-ink-900">
+                  {equippedAccessory}
+                </p>
               </div>
             </section>
 
             <section className="mt-5 rounded-lg border border-slate-200 bg-white px-4 py-4">
-              <div className="flex items-center gap-2">
-                <Trophy className="h-4 w-4 text-qq-600" />
-                <p className="text-sm font-semibold text-ink-900">奖励</p>
+              <div className="flex gap-1 rounded-lg bg-slate-100 p-1">
+                {rightPanelTabs.map((tab) => (
+                  <button
+                    className={[
+                      'flex-1 rounded-md px-3 py-2 text-xs font-semibold transition',
+                      activeRightPanelTab === tab.id
+                        ? 'bg-white text-qq-700 shadow-sm'
+                        : 'text-ink-500 hover:bg-white/70 hover:text-ink-700',
+                    ].join(' ')}
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setRightPanelTab(tab.id)}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
               </div>
-              {nextReward ? (
-                <div className="mt-3 rounded-lg bg-slate-50 px-3 py-3">
+
+              {activeRightPanelTab === 'achievements' ? (
+                <div className="mt-4">
                   <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-semibold text-ink-900">
-                      {nextReward.title}
-                    </p>
-                    <span className="text-xs text-ink-500">
-                      {completedCount}/{nextReward.requiredCheckIns}
+                    <div className="flex items-center gap-2">
+                      <Trophy className="h-4 w-4 text-qq-600" />
+                      <p className="text-sm font-semibold text-ink-900">
+                        成就墙
+                      </p>
+                    </div>
+                    <span className="rounded bg-qq-50 px-2 py-1 text-xs text-qq-700">
+                      {unlockedAchievements.length}/{mockAchievements.length}
                     </span>
                   </div>
-                  <p className="mt-1 text-xs leading-5 text-ink-500">
-                    再完成 {nextReward.requiredCheckIns - completedCount} 个打卡后解锁。
-                  </p>
+
+                  <div className="mt-3 grid grid-cols-5 gap-2 rounded-lg bg-slate-50 p-2">
+                    {visibleAchievements.map((achievement) => {
+                      const unlocked = unlockedAchievementKeys.has(achievement.key)
+                      const label =
+                        achievement.hidden && !unlocked ? '???' : achievement.title
+                      return (
+                        <button
+                          className={[
+                            'flex aspect-square min-w-0 flex-col items-center justify-center rounded-lg border px-1 text-center transition',
+                            unlocked
+                              ? 'border-emerald-200 bg-emerald-50 text-emerald-700 shadow-sm hover:bg-emerald-100'
+                              : 'border-slate-200 bg-white text-ink-400 opacity-60 grayscale hover:opacity-80',
+                            selectedAchievement?.key === achievement.key
+                              ? 'ring-2 ring-qq-200'
+                              : '',
+                          ].join(' ')}
+                          key={achievement.key}
+                          type="button"
+                          title={unlocked ? achievement.description : achievement.hint}
+                          onClick={() => setSelectedAchievementKey(achievement.key)}
+                        >
+                          <Sparkles
+                            className={[
+                              'h-4 w-4',
+                              unlocked ? 'text-emerald-500' : 'text-slate-300',
+                            ].join(' ')}
+                          />
+                          <span className="mt-1 line-clamp-2 text-[10px] font-semibold leading-3">
+                            {label}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {selectedAchievement ? (
+                    <div className="mt-3 rounded-lg bg-slate-50 px-3 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-ink-900">
+                            {selectedAchievement.hidden &&
+                            !selectedAchievementUnlocked
+                              ? '???'
+                              : selectedAchievement.title}
+                          </p>
+                          <p className="mt-1 text-xs leading-5 text-ink-500">
+                            {selectedAchievementUnlocked
+                              ? selectedAchievement.description
+                              : selectedAchievement.hidden
+                                ? '还藏在小龙虾的成长轨迹里。'
+                                : selectedAchievement.hint}
+                          </p>
+                        </div>
+                        <span
+                          className={[
+                            'shrink-0 rounded px-2 py-1 text-xs font-semibold',
+                            selectedAchievementUnlocked
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-white text-ink-400',
+                          ].join(' ')}
+                        >
+                          {selectedAchievementUnlocked ? '已点亮' : '未点亮'}
+                        </span>
+                      </div>
+                      <p className="mt-2 text-xs leading-5 text-ink-500">
+                        奖励：{selectedAchievement.reward}
+                      </p>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
-              {lastReward ? (
-                <p className="mt-3 text-xs leading-5 text-emerald-700">
-                  最近解锁：{lastReward.title}
-                </p>
-              ) : (
-                <p className="mt-3 text-xs leading-5 text-ink-500">
-                  第一次聊天后会解锁第一件小挂饰。
-                </p>
-              )}
+
+              {activeRightPanelTab === 'accessories' ? (
+                <div className="mt-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-qq-600" />
+                      <p className="text-sm font-semibold text-ink-900">
+                        挂饰
+                      </p>
+                    </div>
+                    <span className="rounded bg-qq-50 px-2 py-1 text-xs text-qq-700">
+                      {unlockedRewards.length}/{lobsterRewards.length}
+                    </span>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {lobsterRewards.map((reward) => {
+                      const unlocked = completedCount >= reward.requiredCheckIns
+                      return (
+                        <div
+                          className={[
+                            'rounded-lg border px-3 py-3 transition',
+                            unlocked
+                              ? 'border-qq-100 bg-qq-50 text-ink-900'
+                              : 'border-slate-200 bg-slate-50 text-ink-400 opacity-70 grayscale',
+                          ].join(' ')}
+                          key={reward.id}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold">
+                                {reward.title}
+                              </p>
+                              <p className="mt-1 text-xs leading-5">
+                                {reward.description}
+                              </p>
+                            </div>
+                            <span
+                              className={[
+                                'shrink-0 rounded px-2 py-1 text-xs font-semibold',
+                                unlocked
+                                  ? 'bg-white text-qq-700'
+                                  : 'bg-white text-ink-400',
+                              ].join(' ')}
+                            >
+                              {unlocked ? '已获得' : '未获得'}
+                            </span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
+              {activeRightPanelTab === 'diary' && diaryUnlocked ? (
+                <div className="mt-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <FileText className="h-4 w-4 text-lobster-600" />
+                      <p className="text-sm font-semibold text-ink-900">
+                        日记
+                      </p>
+                    </div>
+                    <span className="rounded bg-lobster-50 px-2 py-1 text-xs text-lobster-700">
+                      {diaryEntries.length} 篇
+                    </span>
+                  </div>
+                  {diaryEntries.length > 0 ? (
+                    <div className="mt-3 rounded-lg bg-[#fff7e8] px-3 py-3">
+                      <p className="line-clamp-2 text-xs leading-5 text-ink-600">
+                        {diaryEntries[0].quote}
+                      </p>
+                      <button
+                        className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-lobster-700 ring-1 ring-lobster-100 transition hover:bg-lobster-50"
+                        type="button"
+                        onClick={openDiaryHistory}
+                      >
+                        <FileText className="h-3.5 w-3.5" />
+                        查看历史日记
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="mt-3 rounded-lg bg-slate-50 px-3 py-3 text-xs leading-5 text-ink-500">
+                      日记已经解锁，等小龙虾写下第一篇。
+                    </p>
+                  )}
+                </div>
+              ) : null}
             </section>
           </div>
         </aside>

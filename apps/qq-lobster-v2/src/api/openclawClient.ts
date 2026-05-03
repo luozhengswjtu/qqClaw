@@ -147,6 +147,14 @@ export interface OpenClawLobsterProfile extends LobsterProfile {
   userId?: string
 }
 
+export interface OpenClawCheckInCompleteOutput {
+  checkins: OpenClawBootstrap['checkins']
+  rewards: LobsterReward[]
+  achievements: Achievement[]
+  newlyUnlockedRewards?: LobsterReward[]
+  newlyUnlockedAchievements?: Achievement[]
+}
+
 interface OpenClawBootstrap {
   lobster: OpenClawLobsterProfile | null
   permissions: GroupPermissionScope[]
@@ -229,13 +237,12 @@ export const openclawClient = {
   },
 
   completeCheckIn(key: string) {
-    return requestJson<{
-      checkins: OpenClawBootstrap['checkins']
-      rewards: LobsterReward[]
-      achievements: Achievement[]
-    }>(`/api/checkins/${encodeURIComponent(key)}/complete`, {
-      method: 'POST',
-    })
+    return requestJson<OpenClawCheckInCompleteOutput>(
+      `/api/checkins/${encodeURIComponent(key)}/complete`,
+      {
+        method: 'POST',
+      },
+    )
   },
 
   chat(

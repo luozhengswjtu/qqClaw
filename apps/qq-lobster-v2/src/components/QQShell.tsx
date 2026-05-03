@@ -371,7 +371,7 @@ export function QQShell() {
                   回到小钳
                 </span>
                 <span className="mt-1 block text-xs leading-5 text-ink-500">
-                  来源看完后继续打卡
+                  来源看完后回到成长墙
                 </span>
               </span>
             </button>

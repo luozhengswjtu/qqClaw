@@ -11,27 +11,28 @@ icon = "run"
 command = '''
 cd E:\sumoAndQt\QQClaw
 
-# 1. 停止正在运行的 OpenClaw API
 $conn = Get-NetTCPConnection -LocalPort 8787 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($conn) {
   Stop-Process -Id $conn.OwningProcess -Force
   Start-Sleep -Seconds 1
 }
 
-# 2. 删除 SQLite 数据库和 WAL/SHM 文件
 $dataDir = Resolve-Path .\apps\openclaw-api\data
 Remove-Item -LiteralPath (Join-Path $dataDir 'openclaw.sqlite') -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $dataDir 'openclaw.sqlite-shm') -Force -ErrorAction SilentlyContinue
 Remove-Item -LiteralPath (Join-Path $dataDir 'openclaw.sqlite-wal') -Force -ErrorAction SilentlyContinue
 
-# 3. 重新启动 OpenClaw API，让它加载 .env 并重建初始数据库
 Start-Process -FilePath 'npm.cmd' -ArgumentList @('run','dev') -WorkingDirectory '.\apps\openclaw-api' -WindowStyle Hidden
 
-# 4. 验证状态
-Start-Sleep -Seconds 3
-
-$health = Invoke-RestMethod -Uri 'http://127.0.0.1:8787/health'
-$b = Invoke-RestMethod -Uri 'http://127.0.0.1:8787/api/bootstrap'
+for ($i = 0; $i -lt 20; $i++) {
+  try {
+    $health = Invoke-RestMethod -Uri 'http://127.0.0.1:8787/health' -TimeoutSec 2
+    $b = Invoke-RestMethod -Uri 'http://127.0.0.1:8787/api/bootstrap' -TimeoutSec 2
+    break
+  } catch {
+    Start-Sleep -Seconds 1
+  }
+}
 
 [pscustomobject]@{
   aiConfigured = $health.ai.configured

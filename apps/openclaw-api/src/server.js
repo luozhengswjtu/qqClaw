@@ -408,10 +408,13 @@ async function route(request, response) {
 
   const checkinMatch = path.match(/^\/api\/checkins\/([^/]+)\/complete$/)
   if (request.method === 'POST' && checkinMatch) {
+    const result = completeCheckin(decodeURIComponent(checkinMatch[1]))
     sendJson(response, 200, {
-      checkins: completeCheckin(decodeURIComponent(checkinMatch[1])),
+      checkins: result.checkins,
       rewards: getRewards(),
       achievements: getAchievements(),
+      newlyUnlockedRewards: result.newlyUnlockedRewards,
+      newlyUnlockedAchievements: result.newlyUnlockedAchievements,
     })
     return
   }

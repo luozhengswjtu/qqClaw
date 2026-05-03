@@ -1,5 +1,5 @@
 import type {
-  Achievement,
+  AchievementCatalogItem,
   CapabilityCard,
   CheckInItem,
   Interest,
@@ -274,6 +274,7 @@ export const groupMembers: GroupMember[] = [
   },
 ]
 
+// checkin is a legacy internal trigger/progress source, not user-facing copy.
 export const lobsterCheckIns: CheckInItem[] = [
   {
     id: 'first_lobster_chat',
@@ -345,7 +346,7 @@ export const lobsterRewards: LobsterReward[] = [
   {
     id: 'star-ornament',
     title: '星星挂饰',
-    description: '完成全部新手打卡后解锁。',
+    description: '探索完首批成长事件后解锁。',
     requiredCheckIns: 5,
     unlocked: false,
   },
@@ -353,4 +354,60 @@ export const lobsterRewards: LobsterReward[] = [
 
 export const mockCards: CapabilityCard[] = []
 
-export const mockAchievements: Achievement[] = []
+export const mockAchievements: AchievementCatalogItem[] = [
+  {
+    key: 'first_claw_touch',
+    id: 'first_claw_touch',
+    title: '初次碰钳',
+    description: '你和小龙虾完成了第一次对话，它开始记住你了。',
+    status: 'locked',
+    reward: '小红旗挂饰',
+    hidden: false,
+    hint: '和小龙虾私聊一句话。',
+    triggerCheckInId: 'first_lobster_chat',
+  },
+  {
+    key: 'first_group_signal',
+    id: 'first_group_signal',
+    title: '捞到重点',
+    description: '第一次让小龙虾从群聊里捞出值得看的提醒。',
+    status: 'locked',
+    reward: '亮晶晶虾壳',
+    hidden: false,
+    hint: '授权一个群聊并生成总结卡。',
+    triggerCheckInId: 'first_group_permission',
+  },
+  {
+    key: 'first_work_log',
+    id: 'first_work_log',
+    title: '透明小本本',
+    description: '第一次查看小龙虾留下的工作记录。',
+    status: 'locked',
+    reward: '透明工作簿',
+    hidden: false,
+    hint: '打开一次工作记录。',
+    triggerCheckInId: 'first_view_work_log',
+  },
+  {
+    key: 'first_space_post',
+    id: 'first_space_post',
+    title: '第一条虾动态',
+    description: '小龙虾第一次把值得记录的小事发进龙虾空间。',
+    status: 'locked',
+    reward: '龙虾空间头图',
+    hidden: false,
+    hint: '让小龙虾生成一条空间动态。',
+    triggerCheckInId: 'first_space_post',
+  },
+  {
+    key: 'first_space_reply',
+    id: 'first_space_reply',
+    title: '评论也会回',
+    description: '第一次在龙虾空间里完成评论回复。',
+    status: 'locked',
+    reward: '星星挂饰',
+    hidden: false,
+    hint: '在龙虾空间里回复一条评论。',
+    triggerCheckInId: 'first_space_comment',
+  },
+]
