@@ -52,6 +52,151 @@ const chatStatusLabel: Record<
 
 type RightPanelTab = 'achievements' | 'accessories' | 'diary'
 
+const equippedAccessoryStorageKey = 'qqclaw.equippedAccessoryId.v1'
+
+function AccessoryPreview({
+  rewardId,
+  selected,
+  unlocked,
+}: {
+  rewardId: string
+  selected?: boolean
+  unlocked: boolean
+}) {
+  const frameClass = [
+    'relative grid h-12 w-12 shrink-0 place-items-center rounded-lg border bg-white',
+    selected ? 'border-qq-300 ring-2 ring-qq-100' : 'border-slate-200',
+    unlocked ? '' : 'opacity-45 grayscale',
+  ].join(' ')
+
+  if (rewardId === 'tiny-flag') {
+    return (
+      <span className={frameClass} aria-hidden="true">
+        <span className="relative h-8 w-8">
+          <span className="absolute left-3 top-1 h-7 w-0.5 rounded-full bg-amber-700" />
+          <span className="absolute left-3 top-1 h-4 w-5 rounded-r-sm bg-red-500 shadow-sm">
+            <span className="absolute inset-y-0 left-0 w-1 bg-red-600" />
+          </span>
+        </span>
+      </span>
+    )
+  }
+
+  if (rewardId === 'shell-badge') {
+    return (
+      <span className={frameClass} aria-hidden="true">
+        <span className="relative grid h-8 w-8 place-items-center rounded-full border border-cyan-200 bg-gradient-to-br from-cyan-100 via-white to-emerald-200 shadow-inner">
+          <Sparkles className="h-4 w-4 text-cyan-600" />
+          <span className="absolute inset-x-2 bottom-2 h-px bg-cyan-300" />
+        </span>
+      </span>
+    )
+  }
+
+  if (rewardId === 'logbook') {
+    return (
+      <span className={frameClass} aria-hidden="true">
+        <span className="relative h-8 w-7 rounded border border-slate-300 bg-white/90 shadow-sm">
+          <span className="absolute inset-y-1 left-1 w-1 rounded bg-qq-200" />
+          <span className="absolute left-3 right-1 top-2 h-px bg-slate-300" />
+          <span className="absolute left-3 right-1 top-4 h-px bg-slate-200" />
+          <span className="absolute left-3 right-2 top-6 h-px bg-slate-200" />
+        </span>
+      </span>
+    )
+  }
+
+  if (rewardId === 'space-banner') {
+    return (
+      <span className={frameClass} aria-hidden="true">
+        <span className="relative h-8 w-9 overflow-hidden rounded-md border border-sky-200 bg-sky-100 shadow-sm">
+          <span className="absolute inset-x-0 top-0 h-3 bg-qq-400" />
+          <span className="absolute bottom-1 left-1 right-1 h-2 rounded bg-white/85" />
+          <span className="absolute bottom-3 left-2 h-2 w-2 rounded-full bg-lobster-400" />
+        </span>
+      </span>
+    )
+  }
+
+  return (
+    <span className={frameClass} aria-hidden="true">
+      <span className="grid h-8 w-8 place-items-center rounded-full border border-amber-200 bg-amber-50">
+        <Sparkles className="h-5 w-5 text-amber-500" />
+      </span>
+    </span>
+  )
+}
+
+function AccessoryOnAvatar({ rewardId }: { rewardId?: string }) {
+  if (!rewardId) {
+    return null
+  }
+
+  if (rewardId === 'tiny-flag') {
+    return (
+      <span
+        className="absolute -right-1 top-0 flex h-9 w-7 origin-bottom-left -rotate-6 items-start justify-center"
+        aria-label="小红旗挂饰"
+        title="小红旗挂饰"
+      >
+        <span className="h-8 w-0.5 rounded-full bg-amber-700" />
+        <span className="absolute left-3 top-0 h-4 w-5 rounded-r-sm bg-red-500 shadow-sm">
+          <span className="absolute inset-y-0 left-0 w-1 bg-red-600" />
+        </span>
+      </span>
+    )
+  }
+
+  if (rewardId === 'shell-badge') {
+    return (
+      <span
+        className="absolute -right-1 bottom-1 grid h-5 w-5 place-items-center rounded-full border border-cyan-200 bg-white shadow-sm"
+        aria-label="亮晶晶虾壳"
+        title="亮晶晶虾壳"
+      >
+        <Sparkles className="h-3 w-3 text-cyan-600" />
+      </span>
+    )
+  }
+
+  if (rewardId === 'logbook') {
+    return (
+      <span
+        className="absolute -right-1 bottom-0 h-6 w-5 rounded border border-slate-300 bg-white shadow-sm"
+        aria-label="透明工作簿"
+        title="透明工作簿"
+      >
+        <span className="absolute inset-y-1 left-1 w-0.5 rounded bg-qq-200" />
+        <span className="absolute left-2.5 right-1 top-2 h-px bg-slate-300" />
+        <span className="absolute left-2.5 right-1 top-3.5 h-px bg-slate-200" />
+      </span>
+    )
+  }
+
+  if (rewardId === 'space-banner') {
+    return (
+      <span
+        className="absolute -right-2 top-0 h-6 w-8 overflow-hidden rounded border border-sky-200 bg-sky-100 shadow-sm"
+        aria-label="龙虾空间头图"
+        title="龙虾空间头图"
+      >
+        <span className="absolute inset-x-0 top-0 h-2 bg-qq-400" />
+        <span className="absolute bottom-1 left-1 right-1 h-1.5 rounded bg-white/85" />
+      </span>
+    )
+  }
+
+  return (
+    <span
+      className="absolute -right-1 top-0 grid h-5 w-5 place-items-center rounded-full border border-amber-200 bg-white shadow-sm"
+      aria-label="星星挂饰"
+      title="星星挂饰"
+    >
+      <Sparkles className="h-3 w-3 text-amber-500" />
+    </span>
+  )
+}
+
 function toContextMessage(message: QQMessage) {
   return {
     id: message.id,
@@ -771,6 +916,15 @@ export function LobsterChatView() {
   )
   const [rightPanelTab, setRightPanelTab] =
     useState<RightPanelTab>('achievements')
+  const [equippedAccessoryId, setEquippedAccessoryId] = useState<string | null>(
+    () => {
+      if (typeof window === 'undefined') {
+        return null
+      }
+
+      return window.localStorage.getItem(equippedAccessoryStorageKey)
+    },
+  )
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const lobsterProfile = useLobsterStore((state) => state.lobsterProfile)
   const chatLines = useLobsterStore((state) => state.lobsterChatLines)
@@ -829,6 +983,10 @@ export function LobsterChatView() {
   const unlockedRewards = lobsterRewards.filter(
     (reward) => completedCount >= reward.requiredCheckIns,
   )
+  const equippedReward =
+    unlockedRewards.find((reward) => reward.id === equippedAccessoryId) ??
+    lastReward ??
+    null
   const unlockedAchievementKeys = new Set(
     mockAchievements
       .filter((achievement) =>
@@ -848,8 +1006,7 @@ export function LobsterChatView() {
   const selectedAchievementUnlocked = selectedAchievement
     ? unlockedAchievementKeys.has(selectedAchievement.key)
     : false
-  const tinyFlagUnlocked = completedCheckInIds.includes('first_lobster_chat')
-  const equippedAccessory = lastReward?.title ?? '还没佩戴挂饰'
+  const equippedAccessory = equippedReward?.title ?? '还没佩戴挂饰'
   const moodLine = latestAchievement
     ? `刚刚点亮「${latestAchievement.title}」`
     : chatLines.length > 0
@@ -886,6 +1043,14 @@ export function LobsterChatView() {
 
     setDraft('')
     await sendLobsterChatMessage(content)
+  }
+
+  function equipAccessory(rewardId: string) {
+    setEquippedAccessoryId(rewardId)
+
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(equippedAccessoryStorageKey, rewardId)
+    }
   }
 
   function handleSuggestionClick(suggestion: LobsterSuggestion) {
@@ -1493,18 +1658,7 @@ export function LobsterChatView() {
               <div className="flex items-center gap-3">
                 <div className="relative shrink-0">
                   <LobsterAvatar size="md" mood={lobsterProfile.mood} animated />
-                  {tinyFlagUnlocked ? (
-                    <span
-                      className="absolute -right-1 top-0 flex h-9 w-7 origin-bottom-left -rotate-6 items-start justify-center"
-                      aria-label="小红旗挂饰"
-                      title="小红旗挂饰"
-                    >
-                      <span className="h-8 w-0.5 rounded-full bg-amber-700" />
-                      <span className="absolute left-3 top-0 h-4 w-5 rounded-r-sm bg-red-500 shadow-sm">
-                        <span className="absolute inset-y-0 left-0 w-1 bg-red-600" />
-                      </span>
-                    </span>
-                  ) : null}
+                  <AccessoryOnAvatar rewardId={equippedReward?.id} />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
@@ -1521,11 +1675,20 @@ export function LobsterChatView() {
                 </div>
               </div>
 
-              <div className="mt-4 rounded-lg bg-white px-3 py-3">
-                <p className="text-xs text-ink-500">当前佩戴</p>
-                <p className="mt-1 truncate text-sm font-semibold text-ink-900">
-                  {equippedAccessory}
-                </p>
+              <div className="mt-4 flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-3">
+                <div className="min-w-0">
+                  <p className="text-xs text-ink-500">当前佩戴</p>
+                  <p className="mt-1 truncate text-sm font-semibold text-ink-900">
+                    {equippedAccessory}
+                  </p>
+                </div>
+                {equippedReward ? (
+                  <AccessoryPreview
+                    rewardId={equippedReward.id}
+                    selected
+                    unlocked
+                  />
+                ) : null}
               </div>
             </section>
 
@@ -1567,10 +1730,13 @@ export function LobsterChatView() {
                       const unlocked = unlockedAchievementKeys.has(achievement.key)
                       const label =
                         achievement.hidden && !unlocked ? '???' : achievement.title
+                      const tooltip = unlocked
+                        ? achievement.description
+                        : achievement.hint
                       return (
                         <button
                           className={[
-                            'flex aspect-square min-w-0 flex-col items-center justify-center rounded-lg border px-1 text-center transition',
+                            'group relative flex aspect-square min-w-0 flex-col items-center justify-center rounded-lg border px-1 text-center transition hover:z-30 focus-visible:z-30',
                             unlocked
                               ? 'border-emerald-200 bg-emerald-50 text-emerald-700 shadow-sm hover:bg-emerald-100'
                               : 'border-slate-200 bg-white text-ink-400 opacity-60 grayscale hover:opacity-80',
@@ -1580,7 +1746,7 @@ export function LobsterChatView() {
                           ].join(' ')}
                           key={achievement.key}
                           type="button"
-                          title={unlocked ? achievement.description : achievement.hint}
+                          aria-label={`${label}，${tooltip}`}
                           onClick={() => setSelectedAchievementKey(achievement.key)}
                         >
                           <Sparkles
@@ -1591,6 +1757,12 @@ export function LobsterChatView() {
                           />
                           <span className="mt-1 line-clamp-2 text-[10px] font-semibold leading-3">
                             {label}
+                          </span>
+                          <span
+                            className="pointer-events-none absolute left-1/2 top-full z-40 mt-1 w-40 -translate-x-1/2 rounded-md border border-slate-200 bg-ink-900 px-2.5 py-1.5 text-left text-xs leading-5 text-white opacity-0 shadow-lg transition-opacity duration-75 group-hover:opacity-100 group-focus-visible:opacity-100"
+                            role="tooltip"
+                          >
+                            {tooltip}
                           </span>
                         </button>
                       )
@@ -1649,37 +1821,58 @@ export function LobsterChatView() {
                   <div className="mt-3 space-y-2">
                     {lobsterRewards.map((reward) => {
                       const unlocked = completedCount >= reward.requiredCheckIns
+                      const equipped = equippedReward?.id === reward.id
                       return (
-                        <div
+                        <button
                           className={[
-                            'rounded-lg border px-3 py-3 transition',
+                            'group relative w-full rounded-lg border px-3 py-3 text-left transition hover:z-30 focus-visible:z-30',
+                            unlocked && equipped
+                              ? 'border-qq-300 bg-qq-50 text-ink-900 ring-2 ring-qq-100'
+                              : '',
+                            unlocked && !equipped
+                              ? 'border-slate-200 bg-white text-ink-900 hover:border-qq-200 hover:bg-qq-50'
+                              : '',
                             unlocked
-                              ? 'border-qq-100 bg-qq-50 text-ink-900'
-                              : 'border-slate-200 bg-slate-50 text-ink-400 opacity-70 grayscale',
+                              ? 'cursor-pointer'
+                              : 'cursor-not-allowed border-slate-200 bg-slate-50 text-ink-400 opacity-70 grayscale',
                           ].join(' ')}
                           key={reward.id}
+                          type="button"
+                          disabled={!unlocked}
+                          aria-label={`${reward.title}，${reward.description}`}
+                          onClick={() => equipAccessory(reward.id)}
                         >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
+                          <div className="flex items-start gap-3">
+                            <AccessoryPreview
+                              rewardId={reward.id}
+                              selected={equipped}
+                              unlocked={unlocked}
+                            />
+                            <div className="min-w-0 flex-1">
                               <p className="truncate text-sm font-semibold">
                                 {reward.title}
-                              </p>
-                              <p className="mt-1 text-xs leading-5">
-                                {reward.description}
                               </p>
                             </div>
                             <span
                               className={[
                                 'shrink-0 rounded px-2 py-1 text-xs font-semibold',
-                                unlocked
+                                unlocked && equipped
+                                  ? 'bg-qq-100 text-qq-700'
+                                  : unlocked
                                   ? 'bg-white text-qq-700'
                                   : 'bg-white text-ink-400',
                               ].join(' ')}
                             >
-                              {unlocked ? '已获得' : '未获得'}
+                              {equipped ? '已佩戴' : unlocked ? '使用' : '未获得'}
                             </span>
                           </div>
-                        </div>
+                          <span
+                            className="pointer-events-none absolute left-3 right-3 top-full z-20 mt-1 rounded-md border border-slate-200 bg-ink-900 px-2.5 py-1.5 text-xs leading-5 text-white opacity-0 shadow-lg transition-opacity duration-75 group-hover:opacity-100 group-focus-visible:opacity-100"
+                            role="tooltip"
+                          >
+                            {reward.description}
+                          </span>
+                        </button>
                       )
                     })}
                   </div>
