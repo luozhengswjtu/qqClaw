@@ -223,7 +223,13 @@ button:disabled {
     background: rgba(17, 24, 39, 0.2);
     color: inherit;
     text-align: left;
-    animation: achievement-overlay-fade 1.9s ease both;
+    animation: achievement-overlay-enter 0.22s ease both;
+    --achievement-target-x: 0px;
+    --achievement-target-y: 0px;
+  }
+
+  .achievement-moment-overlay--leaving {
+    animation: achievement-overlay-exit 0.85s ease both;
   }
 
   .achievement-moment-card {
@@ -240,7 +246,11 @@ button:disabled {
     box-shadow:
       0 22px 48px rgba(15, 23, 42, 0.22),
       0 0 0 8px rgba(255, 255, 255, 0.18);
-    animation: achievement-card-pop 1.9s cubic-bezier(0.2, 0.82, 0.2, 1) both;
+    animation: achievement-card-pop 0.52s cubic-bezier(0.2, 0.82, 0.2, 1) both;
+  }
+
+  .achievement-moment-overlay--leaving .achievement-moment-card {
+    animation: achievement-card-collapse 0.42s ease both;
   }
 
   .achievement-moment-card::after {
@@ -305,21 +315,26 @@ button:disabled {
     border-radius: 999px;
     background: #fed7aa;
     color: #ea580c;
-    animation: achievement-badge-light 1.9s ease both;
+    animation: achievement-badge-light 0.68s ease both;
   }
 
   .achievement-moment-comet {
     position: fixed;
     top: 50%;
     left: 50%;
-    height: 14px;
-    width: 14px;
+    height: 18px;
+    width: 18px;
     border-radius: 999px;
     background: #34d399;
+    opacity: 0;
     box-shadow:
       0 0 18px rgba(52, 211, 153, 0.9),
-      -14px 0 18px rgba(52, 211, 153, 0.24);
-    animation: achievement-comet-fly 1.9s ease-in-out both;
+      0 0 44px rgba(52, 211, 153, 0.44);
+    transform: translate(-50%, -50%) scale(0.6);
+  }
+
+  .achievement-moment-overlay--leaving .achievement-moment-comet {
+    animation: achievement-comet-return 0.85s cubic-bezier(0.18, 0.82, 0.24, 1) both;
   }
 }
 
@@ -364,15 +379,23 @@ button:disabled {
   }
 }
 
-@keyframes achievement-overlay-fade {
+@keyframes achievement-overlay-enter {
   0% {
     opacity: 0;
   }
-  28%,
-  52% {
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes achievement-overlay-exit {
+  0%,
+  72% {
+    background: rgba(17, 24, 39, 0.2);
     opacity: 1;
   }
   100% {
+    background: rgba(17, 24, 39, 0);
     opacity: 0;
   }
 }
@@ -382,17 +405,24 @@ button:disabled {
     opacity: 0;
     transform: translateY(26px) scale(0.94);
   }
-  28% {
+  64% {
     opacity: 1;
     transform: translateY(0) scale(1.01);
   }
-  52% {
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes achievement-card-collapse {
+  0% {
     opacity: 1;
     transform: translateY(0) scale(1);
   }
   100% {
     opacity: 0;
-    transform: translateY(-20px) scale(0.97);
+    transform: translateY(-6px) scale(0.18);
   }
 }
 
@@ -410,17 +440,24 @@ button:disabled {
   }
 }
 
-@keyframes achievement-comet-fly {
-  0%,
-  54% {
+@keyframes achievement-comet-return {
+  0% {
     opacity: 0;
-    transform: translate(-40px, 18px) scale(0.6);
+    transform: translate(-50%, -50%) scale(0.5);
   }
-  66% {
+  18% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.1);
+  }
+  82% {
     opacity: 1;
   }
   100% {
     opacity: 0;
-    transform: translate(calc(50vw - 210px), -130px) scale(0.25);
+    transform: translate(
+        calc(-50% + var(--achievement-target-x)),
+        calc(-50% + var(--achievement-target-y))
+      )
+      scale(0.28);
   }
 }

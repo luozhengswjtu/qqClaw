@@ -3,6 +3,7 @@ import type {
   CapabilityCard,
   CheckInItem,
   Interest,
+  InterestProfile,
   LobsterProfile,
   LobsterReward,
   Personality,
@@ -25,7 +26,7 @@ export const defaultLobsterProfile: LobsterProfile = {
   name: '小钳',
   userCallsign: '队长',
   personality: 'quiet_observer',
-  interests: ['ai_tools'],
+  interests: ['music'],
   mood: 'curious',
   level: 1,
 }
@@ -66,11 +67,112 @@ export const interestOptions: Array<{
   id: Interest
   label: string
 }> = [
-  { id: 'ai_tools', label: 'AI 工具' },
-  { id: 'course_project', label: '课程项目' },
-  { id: 'game_group', label: '游戏社群' },
-  { id: 'campus_event', label: '校园活动' },
-  { id: 'memes', label: '表情包' },
+  { id: 'music', label: '音乐' },
+  { id: 'badminton', label: '羽毛球' },
+  { id: 'custom', label: '自定义' },
+]
+
+export const interestDemoScope = {
+  primaryDepth: {
+    interest: 'music',
+    label: '音乐',
+    sourceLabel: '模拟 QQ 音乐授权数据',
+    summary:
+      '第一版兴趣系统主打音乐纵深，围绕歌手、歌曲、歌单、曲风和演出提醒做陪伴式 Demo。',
+  },
+  genericCapabilityExample: {
+    interest: 'badminton',
+    label: '羽毛球',
+    sourceLabel: '公开社群资料 mock',
+    summary:
+      '社群推荐保留为兴趣系统通用能力，Demo 只用羽毛球 mock 卡展示 QQ 社交生态。',
+  },
+  firstVersionLimits: [
+    '不接真实 QQ 音乐 API',
+    '不真实搜索 QQ 群',
+    '不自动加群',
+    '不自动发动态',
+    '不自动替用户评论或申请加入',
+    '不做复杂多兴趣调度',
+    '不做完整推荐算法',
+  ],
+  profileSourceRules: [
+    '用户在认养时主动选择的兴趣',
+    '用户在聊天中主动补充的偏好',
+    '用户明确授权的腾讯生态数据',
+    '用户主动设置的城市、频率、关键词、屏蔽项',
+    '用户使用过程中的明确反馈',
+  ],
+  inferenceRules: [
+    '可解释',
+    '可查看',
+    '可修改',
+    '可删除',
+    '不作为事实强行写入',
+  ],
+  highRiskActionPolicy: [
+    {
+      action: 'interest_space_post',
+      policy: 'preview_then_user_confirm',
+    },
+    {
+      action: 'community_join_or_apply',
+      policy: 'forbidden_auto_execute',
+    },
+    {
+      action: 'comment_or_private_message',
+      policy: 'preview_then_user_confirm',
+    },
+  ],
+} as const
+
+export const demoInterestProfileSeeds: InterestProfile[] = [
+  {
+    id: 'seed-music-authorized',
+    interest: 'music',
+    enabled: true,
+    topics: ['林俊杰', '周杰伦', '日摇'],
+    city: '深圳',
+    sources: [
+      {
+        id: 'source-mock-qq-music',
+        type: 'qq_music',
+        title: '模拟 QQ 音乐授权数据',
+        authorized: true,
+        permissionNote:
+          'Demo 使用模拟授权数据，只用于生成音乐提醒、兴趣日记素材和空间动态草稿。',
+        evidenceText:
+          '用户在 Demo 初始状态中已授权模拟 QQ 音乐，并表达过关注林俊杰、周杰伦和日摇。',
+      },
+    ],
+    reminderFrequency: 'important_only',
+    tone: 'same_interest_friend',
+    mutedTopics: [],
+    updatedAt: '2026-05-04T09:00:00.000Z',
+  },
+  {
+    id: 'seed-badminton-community',
+    interest: 'badminton',
+    enabled: true,
+    topics: ['固定搭子', '周末约球', '新手友好'],
+    city: '深圳南山',
+    sources: [
+      {
+        id: 'source-public-badminton-group',
+        type: 'public_group_profile',
+        title: '公开群资料',
+        authorized: false,
+        permissionNote:
+          '只读取公开群名、标签和简介，不读取未授权群聊消息，不自动申请加入。',
+        evidenceText:
+          '用户曾在聊天中说过想找固定搭子；候选群信息只来自公开群名、标签和简介。',
+      },
+    ],
+    reminderFrequency: 'important_only',
+    tone: 'same_interest_friend',
+    mutedTopics: [],
+    updatedAt: '2026-05-04T09:05:00.000Z',
+  },
 ]
 
 export const conversations: QQConversation[] = [
@@ -312,6 +414,48 @@ export const lobsterCheckIns: CheckInItem[] = [
     status: 'locked',
     rewardId: 'star-ornament',
   },
+  {
+    id: 'first_interest_memory',
+    title: '第一次同频',
+    description: '第一次补充一条可解释的兴趣画像。',
+    status: 'locked',
+    rewardId: 'music-note',
+  },
+  {
+    id: 'first_music_signal',
+    title: '小小听歌虾',
+    description: '第一次生成音乐同好提醒。',
+    status: 'locked',
+    rewardId: 'music-note',
+  },
+  {
+    id: 'first_interest_space_post',
+    title: '同好动态',
+    description: '第一次发布兴趣空间动态。',
+    status: 'locked',
+    rewardId: 'music-note',
+  },
+  {
+    id: 'first_community_card',
+    title: '发现同好',
+    description: '第一次看到兴趣社群推荐。',
+    status: 'locked',
+    rewardId: 'badminton-racket',
+  },
+  {
+    id: 'community_saved',
+    title: '先收藏一下',
+    description: '第一次收藏推荐社群。',
+    status: 'locked',
+    rewardId: 'badminton-racket',
+  },
+  {
+    id: 'safe_distance',
+    title: '安全距离',
+    description: '多次收藏同好群但不急着申请加入。',
+    status: 'locked',
+    rewardId: 'lookout-shell',
+  },
 ]
 
 export const lobsterRewards: LobsterReward[] = [
@@ -348,6 +492,30 @@ export const lobsterRewards: LobsterReward[] = [
     title: '星星挂饰',
     description: '探索完首批成长事件后解锁。',
     requiredCheckIns: 5,
+    unlocked: false,
+  },
+  {
+    id: 'music-note',
+    title: '小音符挂饰',
+    description: '第一次生成音乐同好提醒后，小龙虾会戴上一枚小音符。',
+    requiredCheckIns: 7,
+    requiredCheckInId: 'first_music_signal',
+    unlocked: false,
+  },
+  {
+    id: 'badminton-racket',
+    title: '小球拍挂饰',
+    description: '第一次发现羽毛球同好群后，小龙虾会带上小球拍。',
+    requiredCheckIns: 9,
+    requiredCheckInId: 'first_community_card',
+    unlocked: false,
+  },
+  {
+    id: 'lookout-shell',
+    title: '安全距离贴纸',
+    description: '多次收藏但不急着申请加入时，小龙虾会贴上一枚观察贴纸。',
+    requiredCheckIns: 11,
+    requiredCheckInId: 'safe_distance',
     unlocked: false,
   },
 ]
@@ -409,5 +577,72 @@ export const mockAchievements: AchievementCatalogItem[] = [
     hidden: false,
     hint: '在龙虾空间里回复一条评论。',
     triggerCheckInId: 'first_space_comment',
+  },
+  {
+    key: 'first_interest_memory',
+    id: 'first_interest_memory',
+    title: '第一次同频',
+    description: '小龙虾第一次补充了一条可解释的兴趣画像。',
+    status: 'locked',
+    reward: '兴趣成就点亮',
+    hidden: false,
+    hint: '授权模拟 QQ 音乐或在聊天里补充低风险兴趣。',
+    triggerCheckInId: 'first_interest_memory',
+  },
+  {
+    key: 'first_music_signal',
+    id: 'first_music_signal',
+    title: '小小听歌虾',
+    description: '小龙虾第一次用同好口吻讲述了一条音乐新动态。',
+    status: 'locked',
+    reward: '小音符挂饰',
+    hidden: false,
+    hint: '查看一次音乐同好提醒。',
+    triggerCheckInId: 'first_music_signal',
+  },
+  {
+    key: 'first_interest_space_post',
+    id: 'first_interest_space_post',
+    title: '同好动态',
+    description: '小龙虾第一次把兴趣内容确认发布进龙虾空间。',
+    status: 'locked',
+    reward: '小音符挂饰',
+    hidden: false,
+    hint: '把音乐提醒生成空间动态并确认发布。',
+    triggerCheckInId: 'first_interest_space_post',
+  },
+  {
+    key: 'first_community_card',
+    id: 'first_community_card',
+    title: '发现同好',
+    description: '小龙虾第一次基于公开资料讲述了一个可能适合的同好群。',
+    status: 'locked',
+    reward: '小球拍挂饰',
+    hidden: false,
+    hint: '查看一次羽毛球同好群推荐。',
+    triggerCheckInId: 'first_community_card',
+  },
+  {
+    key: 'community_saved',
+    id: 'community_saved',
+    title: '先收藏一下',
+    description: '你第一次先收藏了推荐社群，没有急着申请加入。',
+    status: 'locked',
+    reward: '小球拍挂饰',
+    hidden: false,
+    hint: '收藏一次推荐同好群。',
+    triggerCheckInId: 'community_saved',
+  },
+  {
+    key: 'safe_distance',
+    id: 'safe_distance',
+    title: '安全距离',
+    description:
+      '不急着加入也很好，先蹲一蹲、看一看，也是很聪明的社交方式。',
+    status: 'locked',
+    reward: '安全距离贴纸',
+    hidden: true,
+    hint: '多次收藏同好群，但不急着申请加入。',
+    triggerCheckInId: 'safe_distance',
   },
 ]

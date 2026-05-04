@@ -3,9 +3,16 @@ import { Check, ChevronLeft, Heart, Sparkles, X } from 'lucide-react'
 import { openclawAiAdapter } from '../ai/openclawAiAdapter'
 import { interestOptions, personalityOptions } from '../data/mockData'
 import { useLobsterStore } from '../store/useLobsterStore'
+import type { Interest } from '../types'
 import { LobsterAvatar } from './LobsterAvatar'
 
 type AdoptionStep = 'hello' | 'profile' | 'personality' | 'done'
+
+const interestAbilityCopy: Partial<Record<Interest, string>> = {
+  music: '之后可以让小龙虾关注歌手、新歌和演出提醒。',
+  badminton: '之后可以让小龙虾留意公开同好群和活动信息。',
+  custom: '之后可以在聊天里告诉小龙虾更具体的偏好。',
+}
 
 export function AdoptionFlow() {
   const [step, setStep] = useState<AdoptionStep>('hello')
@@ -223,6 +230,25 @@ export function AdoptionFlow() {
                     )
                   })}
                 </div>
+                {adoptionDraft.interests.length > 0 ? (
+                  <div className="space-y-1 rounded-lg bg-qq-50 px-3 py-3">
+                    {adoptionDraft.interests.map((interest) => {
+                      const copy = interestAbilityCopy[interest]
+                      if (!copy) {
+                        return null
+                      }
+
+                      return (
+                        <p
+                          className="text-xs leading-5 text-qq-700"
+                          key={interest}
+                        >
+                          {copy}
+                        </p>
+                      )
+                    })}
+                  </div>
+                ) : null}
               </div>
 
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">

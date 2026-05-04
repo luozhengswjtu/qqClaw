@@ -2,8 +2,11 @@ import type {
   Achievement,
   GroupPermissionScope,
   Interest,
+  InterestNarrativeCard,
+  InterestProfile,
   LobsterChatContext,
   LobsterImageAsset,
+  LobsterChatLine,
   LobsterProfile,
   LobsterReward,
   LobsterDiaryEntry,
@@ -86,6 +89,17 @@ export interface OpenClawSpaceState {
   posts: LobsterSpacePost[]
 }
 
+export interface OpenClawReviewResult {
+  id: string
+  policyKey: string
+  targetType: string
+  targetId?: string | null
+  phase: string
+  result: string
+  detail: Record<string, unknown>
+  createdAt: string
+}
+
 export interface OpenClawSpacePostOutput extends OpenClawAiOutput {
   post: LobsterSpacePost
   workLogId?: string
@@ -110,9 +124,12 @@ export interface OpenClawSpaceAwarenessEventInput {
     | 'hidden_diary_revealed'
     | 'image_generated'
     | 'space_comment_received'
+    | 'interest_music_signal'
+    | 'interest_space_post_published'
   sourceId?: string
   outputId?: string
   workLogId?: string
+  interest?: Interest
   groupId?: string
   groupTitle?: string
   groupCount?: number
@@ -141,6 +158,55 @@ export interface OpenClawSpaceAwarenessOutput {
   space: OpenClawSpaceState
 }
 
+export interface OpenClawInterestEvent {
+  id: string
+  interest: Interest
+  type: string
+  title: string
+  summary: string
+  sourceType: string
+  sourceLabel: string
+  sourceId?: string | null
+  detail: Record<string, unknown>
+  createdAt: string
+}
+
+export interface OpenClawInterestReminderOutput {
+  card: InterestNarrativeCard
+  event: OpenClawInterestEvent
+  signal?: Record<string, unknown>
+  profiles: InterestProfile[]
+}
+
+export interface OpenClawInterestCommunityOutput {
+  card: InterestNarrativeCard
+  event: OpenClawInterestEvent
+  publicGroups: unknown[]
+  publicOnly: boolean
+}
+
+export interface OpenClawInterestSpacePostPreviewOutput {
+  preview: {
+    interest: Interest
+    preview: string
+    sourceLabel: string
+    sourceType?: InterestNarrativeCard['sourceType']
+    previewRequired: true
+    blockedActions?: string[]
+  }
+  event: OpenClawInterestEvent
+  signal?: Record<string, unknown>
+  profiles: InterestProfile[]
+}
+
+export interface OpenClawInterestSpacePostPublishOutput {
+  post: LobsterSpacePost
+  event: OpenClawInterestEvent
+  reviews: OpenClawReviewResult[]
+  space: OpenClawSpaceState
+  previewRequired: false
+}
+
 export interface OpenClawLobsterProfile extends LobsterProfile {
   adoptedAt?: string | null
   updatedAt?: string
@@ -165,8 +231,10 @@ interface OpenClawBootstrap {
   rewards: LobsterReward[]
   achievements: Achievement[]
   messages: QQMessage[]
+  lobsterChatLines?: LobsterChatLine[]
   diary?: OpenClawDiaryState
   space?: OpenClawSpaceState
+  interestProfiles?: InterestProfile[]
   agent: OpenClawAgentRegistry
 }
 
@@ -263,6 +331,156 @@ export const openclawClient = {
       method: 'POST',
       body: JSON.stringify(input),
     })
+  },
+
+  lobsterChatLines(limit = 200) {
+    return requestJson<{ lines: LobsterChatLine[] }>(
+      `/api/lobster-chat-lines?limit=${encodeURIComponent(String(limit))}`,
+    )
+  },
+
+  saveLobsterChatLine(line: LobsterChatLine) {
+    return requestJson<{ line: LobsterChatLine }>('/api/lobster-chat-lines', {
+      method: 'POST',
+      body: JSON.stringify({ line }),
+    })
+  },
+
+  saveLobsterChatLines(lines: LobsterChatLine[]) {
+    return requestJson<{ lines: LobsterChatLine[] }>(
+      '/api/lobster-chat-lines/batch',
+      {
+        method: 'POST',
+        body: JSON.stringify({ lines }),
+      },
+    )
+  },
+
+  interestProfiles() {
+    return requestJson<{ profiles: InterestProfile[] }>('/api/interests/profiles')
+  },
+
+  saveInterestProfile(input: Partial<InterestProfile> & { interest: Interest }) {
+    return requestJson<{
+      profile: InterestProfile
+      profiles: InterestProfile[]
+    }>('/api/interests/profiles', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  },
+
+  interestEvents(input: { interest?: Interest; limit?: number } = {}) {
+    const params = new URLSearchParams()
+    if (input.interest) {
+      params.set('interest', input.interest)
+    }
+    if (input.limit) {
+      params.set('limit', String(input.limit))
+    }
+
+    const suffix = params.toString() ? `?${params.toString()}` : ''
+    return requestJson<{ events: OpenClawInterestEvent[] }>(
+      `/api/interests/events${suffix}`,
+    )
+  },
+
+  authorizeMockQqMusic() {
+    return requestJson<{
+      profile: InterestProfile
+      profiles: InterestProfile[]
+    }>('/api/interests/qq-music/authorize', {
+      method: 'POST',
+    })
+  },
+
+  saveInterestFromChat(text: string) {
+    return requestJson<{
+      status: 'none' | 'saved' | 'needs_confirmation'
+      reason?: string
+      evidenceText?: string
+      receipt?: string
+      profile?: InterestProfile
+      profiles: InterestProfile[]
+    }>('/api/interests/from-chat', {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    })
+  },
+
+  generateInterestReminder(interest: Interest = 'music') {
+    return requestJson<OpenClawInterestReminderOutput>(
+      '/api/interests/reminders/generate',
+      {
+        method: 'POST',
+        body: JSON.stringify({ interest }),
+      },
+    )
+  },
+
+  recommendInterestCommunity(interest: Interest = 'badminton') {
+    return requestJson<OpenClawInterestCommunityOutput>(
+      '/api/interests/communities/recommend',
+      {
+        method: 'POST',
+        body: JSON.stringify({ interest }),
+      },
+    )
+  },
+
+  generateInterestSpacePostPreview(interest: Interest = 'music') {
+    return requestJson<OpenClawInterestSpacePostPreviewOutput>(
+      '/api/interests/space-post-preview',
+      {
+        method: 'POST',
+        body: JSON.stringify({ interest }),
+      },
+    )
+  },
+
+  publishInterestSpacePost(input: {
+    previewEventId?: string
+    postId?: string
+    interest?: Interest
+    content: string
+    sourceLabel?: string
+    sourceType?: string
+  }) {
+    return requestJson<OpenClawInterestSpacePostPublishOutput>(
+      '/api/interests/space-posts/publish',
+      {
+        method: 'POST',
+        body: JSON.stringify(input),
+      },
+    )
+  },
+
+  updateInterestProfile(
+    interest: Interest,
+    input: {
+      enabled?: boolean
+      topics?: string[]
+      city?: string
+      reminderFrequency?: InterestProfile['reminderFrequency']
+      mutedTopics?: string[]
+    },
+  ) {
+    return requestJson<{
+      profile: InterestProfile
+      profiles: InterestProfile[]
+    }>(`/api/interests/profiles/${encodeURIComponent(interest)}`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
+  },
+
+  deleteInterestProfile(interest: Interest) {
+    return requestJson<{ profiles: InterestProfile[] }>(
+      `/api/interests/profiles/${encodeURIComponent(interest)}`,
+      {
+        method: 'DELETE',
+      },
+    )
   },
 
   summarizeGroup(groupId: string) {

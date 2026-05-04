@@ -2,7 +2,9 @@ import { createServer } from 'node:http'
 import { createReadStream, existsSync } from 'node:fs'
 import {
   attachHiddenDiaryImage,
+  authorizeMockQqMusic,
   completeCheckin,
+  deleteInterestProfile,
   dbPath,
   executeRegisteredTool,
   getAgentRegistry,
@@ -12,6 +14,9 @@ import {
   getEvents,
   getAchievements,
   getHiddenDiaryState,
+  getInterestEvents,
+  getInterestProfiles,
+  getLobsterChatLines,
   getMessagesForGroup,
   getMemories,
   getRewards,
@@ -20,12 +25,19 @@ import {
   getToolRuns,
   getTools,
   getWorkLogs,
+  inferAndSaveInterestFromChat,
   initDb,
   recordSpaceInteraction,
+  recordInterestEvent,
+  recordReviewResult,
   revealHiddenDiaryEntry,
   resolveCapability,
   saveAdoption,
+  saveInterestProfile,
+  saveLobsterChatLine,
+  saveLobsterChatLines,
   saveHiddenDiaryEntry,
+  updateInterestProfileSettings,
   saveSpaceComment,
   saveSpacePost,
   savePermissions,
@@ -49,7 +61,7 @@ initDb()
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
     'Access-Control-Allow-Origin': corsOrigin,
-    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type,Authorization',
     'Content-Type': 'application/json; charset=utf-8',
   })
@@ -176,6 +188,90 @@ function normalizeSpaceAwarenessEvent(body) {
     mentionCount: Number(body.mentionCount || 0),
     groupCount: Number(body.groupCount || 0),
   }
+}
+
+function normalizeInterestProfileInput(body) {
+  const interest = String(body.interest || '').trim()
+  if (!interest) {
+    const error = new Error('Interest is required')
+    error.status = 400
+    throw error
+  }
+
+  return {
+    id: body.id,
+    interest,
+    enabled:
+      typeof body.enabled === 'boolean' ? body.enabled : body.enabled !== false,
+    topics: Array.isArray(body.topics) ? body.topics : [],
+    city: body.city ? String(body.city) : undefined,
+    sources: Array.isArray(body.sources)
+      ? body.sources
+      : [
+          {
+            id: `source-api-${Date.now()}`,
+            type: 'user_setting',
+            title: 'API 保存的兴趣画像',
+            authorized: false,
+            permissionNote:
+              '用户可查看、修改或删除这条兴趣画像；不会自动对外执行动作。',
+            evidenceText: body.evidenceText
+              ? String(body.evidenceText)
+              : '用户通过兴趣画像 API 保存。',
+          },
+        ],
+    reminderFrequency: body.reminderFrequency || 'important_only',
+    tone: body.tone || 'same_interest_friend',
+    mutedTopics: Array.isArray(body.mutedTopics) ? body.mutedTopics : [],
+  }
+}
+
+function runToolOrThrow(toolKey, input, capabilityKey) {
+  const result = executeRegisteredTool(toolKey, input, { capabilityKey })
+  if (result.toolRun.status === 'blocked') {
+    const error = new Error(result.toolRun.errorMessage || 'Tool run blocked')
+    error.status = 403
+    error.result = result
+    throw error
+  }
+
+  return result
+}
+
+function pickInterestSignal(interest) {
+  const profileTool = runToolOrThrow(
+    'read_mock_interest_profile',
+    { interest },
+    'interest_reminder',
+  )
+  const signalTool = runToolOrThrow(
+    interest === 'music' ? 'read_mock_qq_music_signals' : 'read_mock_qq_music_signals',
+    { interest },
+    'interest_reminder',
+  )
+  const rankTool = runToolOrThrow(
+    'rank_interest_signals',
+    {
+      interest,
+      profiles: profileTool.output.profiles,
+      signals: signalTool.output.signals,
+    },
+    'interest_reminder',
+  )
+
+  return {
+    profileTool,
+    signalTool,
+    rankTool,
+    signal: rankTool.output.ranked[0] ?? signalTool.output.signals?.[0],
+  }
+}
+
+function sanitizeSpacePostContent(content) {
+  return String(content || '')
+    .replace(/1[3-9]\d{9}/g, '手机号已脱敏')
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '邮箱已脱敏')
+    .trim()
 }
 
 function getSpaceAwarenessSourceKey(event) {
@@ -362,6 +458,303 @@ async function route(request, response) {
     return
   }
 
+  if (request.method === 'GET' && path === '/api/lobster-chat-lines') {
+    const limit = Number(url.searchParams.get('limit') || 200)
+    sendJson(response, 200, { lines: getLobsterChatLines(limit) })
+    return
+  }
+
+  if (request.method === 'POST' && path === '/api/lobster-chat-lines') {
+    const body = await readJson(request)
+    sendJson(response, 200, { line: saveLobsterChatLine(body.line || body) })
+    return
+  }
+
+  if (request.method === 'POST' && path === '/api/lobster-chat-lines/batch') {
+    const body = await readJson(request)
+    sendJson(response, 200, { lines: saveLobsterChatLines(body.lines) })
+    return
+  }
+
+  if (request.method === 'GET' && path === '/api/interests/profiles') {
+    sendJson(response, 200, { profiles: getInterestProfiles() })
+    return
+  }
+
+  if (request.method === 'POST' && path === '/api/interests/profiles') {
+    const body = await readJson(request)
+    const profile = saveInterestProfile(
+      normalizeInterestProfileInput(body),
+      'api',
+      body.sourceId || null,
+    )
+    sendJson(response, 200, {
+      profile,
+      profiles: getInterestProfiles(),
+    })
+    return
+  }
+
+  if (request.method === 'GET' && path === '/api/interests/events') {
+    const limit = Number(url.searchParams.get('limit') || 50)
+    const interest = url.searchParams.get('interest') || undefined
+    sendJson(response, 200, { events: getInterestEvents(limit, interest) })
+    return
+  }
+
+  if (request.method === 'POST' && path === '/api/interests/qq-music/authorize') {
+    sendJson(response, 200, {
+      profile: authorizeMockQqMusic(),
+      profiles: getInterestProfiles(),
+    })
+    return
+  }
+
+  if (request.method === 'POST' && path === '/api/interests/from-chat') {
+    const body = await readJson(request)
+    const result = inferAndSaveInterestFromChat(body.text)
+    sendJson(response, 200, {
+      ...result,
+      profiles: getInterestProfiles(),
+    })
+    return
+  }
+
+  if (request.method === 'POST' && path === '/api/interests/reminders/generate') {
+    const body = await readJson(request)
+    const interest = String(body.interest || 'music')
+    const { profileTool, signalTool, rankTool, signal } = pickInterestSignal(interest)
+    const cardTool = runToolOrThrow(
+      'generate_interest_reminder_card',
+      { interest, signal },
+      'interest_reminder',
+    )
+    const card = cardTool.output.card
+    const event = recordInterestEvent({
+      interest: card.interest || interest,
+      type: 'reminder',
+      title: card.title,
+      summary: card.summary,
+      sourceType: card.sourceType,
+      sourceLabel: card.sourceLabel,
+      sourceId: signal?.id || cardTool.toolRun.id,
+      detail: {
+        reason: card.reason,
+        toolRunIds: [
+          profileTool.toolRun.id,
+          signalTool.toolRun.id,
+          rankTool.toolRun.id,
+          cardTool.toolRun.id,
+        ],
+      },
+    })
+    sendJson(response, 200, {
+      card,
+      event,
+      signal,
+      profiles: getInterestProfiles(),
+      toolRuns: [
+        profileTool.toolRun,
+        signalTool.toolRun,
+        rankTool.toolRun,
+        cardTool.toolRun,
+      ],
+      reviews: [
+        ...profileTool.reviews,
+        ...signalTool.reviews,
+        ...rankTool.reviews,
+        ...cardTool.reviews,
+      ],
+    })
+    return
+  }
+
+  if (request.method === 'POST' && path === '/api/interests/communities/recommend') {
+    const body = await readJson(request)
+    const interest = String(body.interest || 'badminton')
+    const groupTool = runToolOrThrow(
+      'read_public_group_profiles',
+      { interest },
+      'interest_community_recommendation',
+    )
+    const cardTool = runToolOrThrow(
+      'generate_interest_community_card',
+      {
+        interest,
+        publicGroups: groupTool.output.publicGroups,
+      },
+      'interest_community_recommendation',
+    )
+    const card = cardTool.output.card
+    const event = recordInterestEvent({
+      interest: card.interest || interest,
+      type: 'community_recommendation',
+      title: card.title,
+      summary: card.summary,
+      sourceType: 'public_group_profile',
+      sourceLabel: card.sourceLabel,
+      sourceId: groupTool.output.publicGroups?.[0]?.id || cardTool.toolRun.id,
+      detail: {
+        publicOnly: cardTool.output.publicOnly,
+        reason: card.reason,
+        toolRunIds: [groupTool.toolRun.id, cardTool.toolRun.id],
+      },
+    })
+    sendJson(response, 200, {
+      card,
+      event,
+      publicGroups: groupTool.output.publicGroups,
+      publicOnly: cardTool.output.publicOnly,
+      toolRuns: [groupTool.toolRun, cardTool.toolRun],
+      reviews: [...groupTool.reviews, ...cardTool.reviews],
+    })
+    return
+  }
+
+  if (request.method === 'POST' && path === '/api/interests/space-post-preview') {
+    const body = await readJson(request)
+    const interest = String(body.interest || 'music')
+    const { profileTool, signalTool, rankTool, signal } = pickInterestSignal(interest)
+    const previewTool = runToolOrThrow(
+      'generate_interest_space_post_preview',
+      {
+        interest,
+        signal,
+        preview: body.preview,
+      },
+      'interest_space_post_preview',
+    )
+    const preview = previewTool.output
+    const event = recordInterestEvent({
+      interest: preview.interest || interest,
+      type: 'space_post_preview',
+      title: '兴趣空间动态预览',
+      summary: preview.preview,
+      sourceType: signal?.sourceType || 'mock',
+      sourceLabel: preview.sourceLabel,
+      sourceId: signal?.id || previewTool.toolRun.id,
+      detail: {
+        previewRequired: preview.previewRequired,
+        toolRunIds: [
+          profileTool.toolRun.id,
+          signalTool.toolRun.id,
+          rankTool.toolRun.id,
+          previewTool.toolRun.id,
+        ],
+      },
+    })
+    sendJson(response, 200, {
+      preview,
+      event,
+      signal,
+      profiles: getInterestProfiles(),
+      toolRuns: [
+        profileTool.toolRun,
+        signalTool.toolRun,
+        rankTool.toolRun,
+        previewTool.toolRun,
+      ],
+      reviews: [
+        ...profileTool.reviews,
+        ...signalTool.reviews,
+        ...rankTool.reviews,
+        ...previewTool.reviews,
+      ],
+    })
+    return
+  }
+
+  if (request.method === 'POST' && path === '/api/interests/space-posts/publish') {
+    const body = await readJson(request)
+    const content = sanitizeSpacePostContent(body.content)
+    if (!content) {
+      sendJson(response, 400, {
+        error: {
+          message: 'Space post content is required',
+        },
+      })
+      return
+    }
+
+    const interest = String(body.interest || 'music')
+    const sourceType = String(body.sourceType || 'mock')
+    const sourceLabel = String(body.sourceLabel || '用户确认后发布')
+    const post = saveSpacePost({
+      id: body.postId || undefined,
+      kind: 'interest',
+      content,
+      sourceWorkLogId: body.previewEventId || null,
+    })
+    const confirmationReview = recordReviewResult({
+      policyKey: 'user_confirmed_interest_space_post',
+      targetType: 'space_post',
+      targetId: post.id,
+      phase: 'pre',
+      result: 'passed',
+      detail: {
+        interest,
+        previewEventId: body.previewEventId || null,
+        sourceType,
+        sourceLabel,
+        confirmationRequired: true,
+      },
+    })
+    const desensitizeReview = recordReviewResult({
+      policyKey: 'desensitize_share_output',
+      targetType: 'space_post',
+      targetId: post.id,
+      phase: 'post',
+      result: content === body.content ? 'passed' : 'rewritten',
+      detail: {
+        interest,
+        rule: 'Shareable interest space content is checked before publish.',
+      },
+    })
+    const event = recordInterestEvent({
+      interest,
+      type: 'space_post_published',
+      title: '兴趣空间动态已确认发布',
+      summary: content,
+      sourceType,
+      sourceLabel,
+      sourceId: post.id,
+      detail: {
+        previewEventId: body.previewEventId || null,
+        reviewIds: [confirmationReview.id, desensitizeReview.id],
+        previewRequired: false,
+      },
+    })
+
+    sendJson(response, 200, {
+      post,
+      event,
+      reviews: [confirmationReview, desensitizeReview],
+      previewRequired: false,
+      space: getSpaceState(),
+    })
+    return
+  }
+
+  const interestProfileMatch = path.match(/^\/api\/interests\/profiles\/([^/]+)$/)
+  if (request.method === 'POST' && interestProfileMatch) {
+    const body = await readJson(request)
+    sendJson(response, 200, {
+      profile: updateInterestProfileSettings(
+        decodeURIComponent(interestProfileMatch[1]),
+        body,
+      ),
+      profiles: getInterestProfiles(),
+    })
+    return
+  }
+
+  if (request.method === 'DELETE' && interestProfileMatch) {
+    sendJson(response, 200, {
+      profiles: deleteInterestProfile(decodeURIComponent(interestProfileMatch[1])),
+    })
+    return
+  }
+
   if (request.method === 'GET' && path === '/api/events') {
     const limit = Number(url.searchParams.get('limit') || 50)
     sendJson(response, 200, { events: getEvents(limit) })
@@ -528,6 +921,9 @@ async function route(request, response) {
     )
 
     completeCheckin('first_space_post')
+    if (event.type === 'interest_space_post_published') {
+      completeCheckin('first_interest_space_post')
+    }
     sendJson(response, 200, {
       posted: true,
       reason: assessment.reason,
@@ -569,7 +965,7 @@ async function route(request, response) {
     const output = await runAiTask(
       'chat',
       body,
-      'Handle private chat with the adopted lobster profile and keep the response concise.',
+      'Handle private chat with the adopted lobster profile. If interest context exists, reference it naturally only when useful, with a same-interest-friend tone and no advertising.',
     )
     writeWorkLog('ai-chat', 'Lobster chat generated', {
       capabilityKey: capability?.key,

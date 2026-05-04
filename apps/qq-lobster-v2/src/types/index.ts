@@ -15,6 +15,42 @@ export type Interest =
   | 'game_group'
   | 'campus_event'
   | 'memes'
+  | 'music'
+  | 'badminton'
+  | 'anime'
+  | 'custom'
+
+export interface InterestSource {
+  id: string
+  type:
+    | 'mock'
+    | 'adoption'
+    | 'chat'
+    | 'qq_music'
+    | 'public_group_profile'
+    | 'authorized_qq_group'
+    | 'website'
+    | 'event_platform'
+    | 'user_setting'
+    | 'user_feedback'
+  title: string
+  authorized: boolean
+  permissionNote: string
+  evidenceText?: string
+}
+
+export interface InterestProfile {
+  id: string
+  interest: Interest
+  enabled: boolean
+  topics: string[]
+  city?: string
+  sources: InterestSource[]
+  reminderFrequency: 'important_only' | 'daily_digest' | 'weekly_digest' | 'off'
+  tone: 'same_interest_friend' | 'brief_assistant'
+  mutedTopics: string[]
+  updatedAt: string
+}
 
 export type CheckInStatus = 'locked' | 'active' | 'done'
 
@@ -26,6 +62,8 @@ export type CardType =
   | 'diary'
   | 'achievement'
   | 'space_post'
+  | 'interest_reminder'
+  | 'interest_community'
 
 export type LobsterChatStatus =
   | 'generating'
@@ -145,7 +183,7 @@ export interface LobsterSpaceComment {
 
 export interface LobsterSpacePost {
   id: string
-  kind: 'diary' | 'achievement' | 'status'
+  kind: 'diary' | 'achievement' | 'status' | 'interest'
   authorLobsterId: string
   authorName: string
   content: string
@@ -204,7 +242,80 @@ export interface SummaryCardFollowUpContext {
   }
 }
 
-export type LobsterChatContext = SummaryCardFollowUpContext
+export interface PrivateChatInterestContext {
+  type: 'private_chat'
+  interestProfiles: Array<{
+    interest: Interest
+    label: string
+    topics: string[]
+    city?: string
+    sourceLabels: string[]
+    reminderFrequency: InterestProfile['reminderFrequency']
+    tone: InterestProfile['tone']
+  }>
+  userSignal: 'low_energy' | 'interest_related' | 'neutral'
+  guidance: string[]
+}
+
+export type LobsterChatContext =
+  | SummaryCardFollowUpContext
+  | PrivateChatInterestContext
+
+export type MusicAuthorizationStatus = 'pending' | 'authorized' | 'declined'
+
+export type InterestCardAction =
+  | {
+      id: 'view_source'
+      label: string
+    }
+  | {
+      id: 'generate_space_post'
+      label: string
+    }
+  | {
+      id: 'publish_space_post'
+      label: string
+    }
+  | {
+      id: 'favorite'
+      label: string
+    }
+  | {
+      id: 'apply_to_join'
+      label: string
+    }
+
+export interface InterestCommunityCandidate {
+  id: string
+  title: string
+  tags: string[]
+  publicIntro: string
+  city: string
+  sourceLabel: string
+  reason: string
+  boundary: string
+}
+
+export interface InterestNarrativeCard {
+  id: string
+  type: 'interest_reminder' | 'interest_community'
+  interest: Interest
+  narrative: string
+  title: string
+  summary: string
+  reason: string
+  sourceLabel: string
+  sourceType:
+    | 'mock'
+    | 'chat'
+    | 'qq_music'
+    | 'public_group_profile'
+    | 'authorized_qq_group'
+  riskNote: string
+  sourceDetail?: string
+  community?: InterestCommunityCandidate
+  actions: InterestCardAction[]
+}
 
 export type LobsterChatCard =
   | {
@@ -248,9 +359,28 @@ export type LobsterChatCard =
       entry: LobsterDiaryEntry
     }
   | {
+      type: 'music_authorization_card'
+      status: MusicAuthorizationStatus
+    }
+  | {
+      type: 'interest_memory_card'
+      profile: InterestProfile
+      receipt?: string
+    }
+  | {
+      type: 'interest_risk_confirmation_card'
+      title: string
+      reason: string
+      evidenceText: string
+    }
+  | InterestNarrativeCard
+  | {
       type: 'space_post_card'
       post: LobsterSpacePost
       previewRequired: boolean
+      interest?: Interest
+      sourceLabel?: string
+      sourceType?: InterestNarrativeCard['sourceType']
       source: 'real-ai' | 'mock-fallback' | 'local-fallback'
     }
 
@@ -326,6 +456,7 @@ export interface LobsterReward {
   title: string
   description: string
   requiredCheckIns: number
+  requiredCheckInId?: string
   unlocked: boolean
   unlockedAt?: string | null
 }

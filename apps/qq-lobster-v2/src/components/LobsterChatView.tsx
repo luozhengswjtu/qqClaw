@@ -7,6 +7,7 @@ import {
   Heart,
   MessageSquare,
   MoreHorizontal,
+  Music,
   Search,
   Send,
   Share2,
@@ -26,6 +27,10 @@ import {
 import { useLobsterStore } from '../store/useLobsterStore'
 import type {
   GroupPermissionScope,
+  Interest,
+  InterestNarrativeCard as InterestNarrativeCardData,
+  InterestSource,
+  InterestProfile,
   LobsterChatLine,
   LobsterChatContext,
   LobsterDiaryEntry,
@@ -50,9 +55,23 @@ const chatStatusLabel: Record<
   failed: '失败',
 }
 
-type RightPanelTab = 'achievements' | 'accessories' | 'diary'
+type RightPanelTab = 'achievements' | 'accessories' | 'interests' | 'diary'
 
 const equippedAccessoryStorageKey = 'qqclaw.equippedAccessoryId.v1'
+const interestAccessoryIds = new Set([
+  'music-note',
+  'badminton-racket',
+  'lookout-shell',
+])
+
+function isRewardUnlocked(
+  reward: (typeof lobsterRewards)[number],
+  completedCheckInIds: string[],
+) {
+  return reward.requiredCheckInId
+    ? completedCheckInIds.includes(reward.requiredCheckInId)
+    : completedCheckInIds.length >= reward.requiredCheckIns
+}
 
 function AccessoryPreview({
   rewardId,
@@ -113,6 +132,39 @@ function AccessoryPreview({
           <span className="absolute inset-x-0 top-0 h-3 bg-qq-400" />
           <span className="absolute bottom-1 left-1 right-1 h-2 rounded bg-white/85" />
           <span className="absolute bottom-3 left-2 h-2 w-2 rounded-full bg-lobster-400" />
+        </span>
+      </span>
+    )
+  }
+
+  if (rewardId === 'music-note') {
+    return (
+      <span className={frameClass} aria-hidden="true">
+        <span className="grid h-8 w-8 place-items-center rounded-full border border-fuchsia-200 bg-fuchsia-50">
+          <Music className="h-5 w-5 text-fuchsia-600" />
+        </span>
+      </span>
+    )
+  }
+
+  if (rewardId === 'badminton-racket') {
+    return (
+      <span className={frameClass} aria-hidden="true">
+        <span className="relative h-8 w-8">
+          <span className="absolute left-2 top-0 h-5 w-5 rotate-12 rounded-full border-2 border-emerald-400 bg-emerald-50" />
+          <span className="absolute bottom-1 left-4 h-5 w-1 -rotate-45 rounded bg-amber-700" />
+          <span className="absolute bottom-2 right-0 h-2 w-2 rounded-full bg-white ring-1 ring-slate-300" />
+        </span>
+      </span>
+    )
+  }
+
+  if (rewardId === 'lookout-shell') {
+    return (
+      <span className={frameClass} aria-hidden="true">
+        <span className="relative grid h-8 w-8 place-items-center rounded-full border border-teal-200 bg-teal-50">
+          <span className="h-5 w-6 rounded-t-full border-x border-t border-teal-400 bg-white" />
+          <span className="absolute bottom-2 h-px w-5 bg-teal-300" />
         </span>
       </span>
     )
@@ -182,6 +234,43 @@ function AccessoryOnAvatar({ rewardId }: { rewardId?: string }) {
       >
         <span className="absolute inset-x-0 top-0 h-2 bg-qq-400" />
         <span className="absolute bottom-1 left-1 right-1 h-1.5 rounded bg-white/85" />
+      </span>
+    )
+  }
+
+  if (rewardId === 'music-note') {
+    return (
+      <span
+        className="absolute -right-1 -top-1 grid h-6 w-6 place-items-center rounded-full border border-fuchsia-200 bg-white shadow-sm"
+        aria-label="小音符挂饰"
+        title="小音符挂饰"
+      >
+        <Music className="h-3.5 w-3.5 text-fuchsia-600" />
+      </span>
+    )
+  }
+
+  if (rewardId === 'badminton-racket') {
+    return (
+      <span
+        className="absolute -right-2 bottom-0 h-7 w-7"
+        aria-label="小球拍挂饰"
+        title="小球拍挂饰"
+      >
+        <span className="absolute left-1 top-0 h-4 w-4 rotate-12 rounded-full border-2 border-emerald-400 bg-white shadow-sm" />
+        <span className="absolute bottom-1 left-4 h-4 w-1 -rotate-45 rounded bg-amber-700 shadow-sm" />
+      </span>
+    )
+  }
+
+  if (rewardId === 'lookout-shell') {
+    return (
+      <span
+        className="absolute -right-1 bottom-1 grid h-5 w-6 place-items-center rounded-t-full border border-teal-200 bg-white shadow-sm"
+        aria-label="安全距离贴纸"
+        title="安全距离贴纸"
+      >
+        <span className="h-2 w-4 rounded-t-full bg-teal-100" />
       </span>
     )
   }
@@ -403,6 +492,370 @@ function PermissionRequestCard({
       >
         相关 @ 会跟随对应群的总结一起展示。
       </p>
+    </div>
+  )
+}
+
+function interestLabel(interest: Interest) {
+  const labels: Record<Interest, string> = {
+    ai_tools: 'AI 工具',
+    course_project: '课程项目',
+    game_group: '游戏社群',
+    campus_event: '校园活动',
+    memes: '表情包',
+    music: '音乐',
+    badminton: '羽毛球',
+    anime: '二次元',
+    custom: '自定义',
+  }
+
+  return labels[interest]
+}
+
+function interestPersonaLabel(interest: Interest) {
+  const labels: Partial<Record<Interest, string>> = {
+    music: '音乐同好',
+    badminton: '羽毛球搭子雷达',
+    custom: '自定义兴趣观察员',
+  }
+
+  return labels[interest] ?? `${interestLabel(interest)}观察员`
+}
+
+function interestSourceTypeLabel(
+  type?: InterestSource['type'] | InterestNarrativeCardData['sourceType'],
+) {
+  if (type === 'qq_music') {
+    return '模拟 QQ 音乐授权数据'
+  }
+
+  if (type === 'public_group_profile') {
+    return '公开群资料'
+  }
+
+  if (type === 'chat') {
+    return '用户聊天补充'
+  }
+
+  if (type === 'authorized_qq_group') {
+    return '已授权 QQ 群'
+  }
+
+  if (type === 'adoption') {
+    return '认养时主动选择'
+  }
+
+  if (type === 'user_setting' || type === 'user_feedback') {
+    return '用户手动设置'
+  }
+
+  return '可解释来源'
+}
+
+function interestSourceDisplayLabel(source: InterestSource) {
+  if (source.type === 'qq_music' || source.title.includes('QQ 音乐')) {
+    return '模拟 QQ 音乐授权数据'
+  }
+
+  if (source.type === 'public_group_profile' || source.title.includes('公开')) {
+    return '公开群资料'
+  }
+
+  if (source.type === 'chat') {
+    return '用户聊天补充'
+  }
+
+  if (source.type === 'authorized_qq_group') {
+    return '已授权 QQ 群'
+  }
+
+  return source.title
+}
+
+function MusicAuthorizationCard({
+  status,
+  disabled,
+  onAuthorize,
+  onDecline,
+}: {
+  status: 'pending' | 'authorized' | 'declined'
+  disabled: boolean
+  onAuthorize: () => void
+  onDecline: () => void
+}) {
+  return (
+    <div className="mt-3 rounded-lg border border-qq-100 bg-qq-50 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-ink-900">模拟 QQ 音乐授权</p>
+          <p className="mt-1 text-xs leading-5 text-ink-500">
+            Demo 使用模拟授权数据，不接入真实 QQ 音乐。
+          </p>
+        </div>
+        <span className="rounded bg-white px-2 py-1 text-xs text-qq-700">
+          {status === 'authorized'
+            ? '已授权'
+            : status === 'declined'
+              ? '未授权'
+              : '需确认'}
+        </span>
+      </div>
+      <div className="mt-3 grid gap-2 text-xs leading-5 text-ink-600">
+        <p>将读取：关注歌手、最近常听、收藏歌单、城市演出提醒偏好。</p>
+        <p>不会读取：私密评论、聊天记录、支付信息。</p>
+        <p>用途：音乐提醒、兴趣日记素材、龙虾空间动态草稿、兴趣成就。</p>
+      </div>
+      {status === 'pending' ? (
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button
+            className="inline-flex items-center gap-2 rounded-lg bg-qq-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-qq-600 disabled:cursor-not-allowed disabled:bg-slate-300"
+            type="button"
+            disabled={disabled}
+            onClick={onAuthorize}
+          >
+            <Check className="h-3.5 w-3.5" />
+            授权模拟 QQ 音乐
+          </button>
+          <button
+            className="inline-flex items-center rounded-lg bg-white px-3 py-2 text-xs font-semibold text-ink-500 ring-1 ring-slate-200 transition hover:bg-slate-50 disabled:cursor-not-allowed"
+            type="button"
+            disabled={disabled}
+            onClick={onDecline}
+          >
+            暂时不用
+          </button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function InterestMemoryCard({
+  profile,
+  receipt,
+  disabled,
+  onEdit,
+  onDelete,
+}: {
+  profile: InterestProfile
+  receipt?: string
+  disabled: boolean
+  onEdit: (interest: Interest) => void
+  onDelete: (interest: Interest) => void
+}) {
+  const source = profile.sources[profile.sources.length - 1] ?? profile.sources[0]
+
+  return (
+    <div className="mt-3 rounded-lg border border-emerald-100 bg-emerald-50 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-ink-900">
+            兴趣记忆 · {interestLabel(profile.interest)}
+          </p>
+          <p className="mt-1 text-xs leading-5 text-emerald-700">
+            {receipt ?? '这条画像可以查看、修改或删除。'}
+          </p>
+        </div>
+        <span className="rounded bg-white px-2 py-1 text-xs text-emerald-700">
+          已记录
+        </span>
+      </div>
+      <div className="mt-3 space-y-2 text-xs leading-5 text-ink-700">
+        <p>关注对象：{profile.topics.join('、') || '暂未记录'}</p>
+        {profile.city ? <p>城市：{profile.city}</p> : null}
+        <p>来源：{source?.title ?? '未知来源'}</p>
+        {source?.evidenceText ? <p>为什么知道：{source.evidenceText}</p> : null}
+        <p>最近更新：{new Date(profile.updatedAt).toLocaleString()}</p>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button
+          className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-qq-700 ring-1 ring-qq-100 transition hover:bg-qq-50 disabled:cursor-not-allowed"
+          type="button"
+          disabled={disabled}
+          onClick={() => onEdit(profile.interest)}
+        >
+          修改
+        </button>
+        <button
+          className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-red-600 ring-1 ring-red-100 transition hover:bg-red-50 disabled:cursor-not-allowed"
+          type="button"
+          disabled={disabled}
+          onClick={() => onDelete(profile.interest)}
+        >
+          删除
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function InterestRiskConfirmationCard({
+  title,
+  reason,
+  evidenceText,
+}: {
+  title: string
+  reason: string
+  evidenceText: string
+}) {
+  return (
+    <div className="mt-3 rounded-lg border border-amber-100 bg-amber-50 p-4">
+      <p className="text-sm font-semibold text-ink-900">{title}</p>
+      <p className="mt-2 text-xs leading-5 text-amber-800">{reason}</p>
+      <p className="mt-2 rounded-lg bg-white px-3 py-2 text-xs leading-5 text-ink-600">
+        {evidenceText}
+      </p>
+      <p className="mt-2 text-xs leading-5 text-ink-500">
+        高影响信息、外部授权和对外发布不会自动保存或执行。
+      </p>
+    </div>
+  )
+}
+
+function InterestNarrativeCard({
+  card,
+  onFavoriteCommunity,
+  onGenerateSpacePost,
+}: {
+  card: InterestNarrativeCardData
+  onFavoriteCommunity?: () => void
+  onGenerateSpacePost?: () => void | Promise<void>
+}) {
+  const [sourceVisible, setSourceVisible] = useState(false)
+  const [favoriteSaved, setFavoriteSaved] = useState(false)
+  const [applyNoticeVisible, setApplyNoticeVisible] = useState(false)
+
+  return (
+    <div className="mt-3 overflow-hidden rounded-lg border border-qq-100 bg-white shadow-sm">
+      <div className="bg-[#eef7ff] px-4 py-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-ink-900">{card.title}</p>
+            <p className="mt-1 text-xs leading-5 text-ink-500">
+              {interestLabel(card.interest)} · {card.sourceLabel}
+            </p>
+          </div>
+          <span className="rounded bg-white px-2 py-1 text-xs font-semibold text-qq-700">
+            {interestSourceTypeLabel(card.sourceType)}
+          </span>
+        </div>
+        <p className="mt-3 text-sm leading-6 text-ink-800">{card.summary}</p>
+      </div>
+
+      <div className="px-4 py-4">
+        <div className="grid gap-2 text-xs leading-5 text-ink-700">
+          <p>来源类型：{interestSourceTypeLabel(card.sourceType)}</p>
+          <p>来源说明：{card.sourceLabel}</p>
+          <p>原因：{card.reason}</p>
+          <p>边界：{card.riskNote}</p>
+        </div>
+
+        {card.community ? (
+          <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-ink-900">
+                  {card.community.title}
+                </p>
+                <p className="mt-1 text-xs text-ink-500">
+                  {card.community.city} · {card.community.sourceLabel}
+                </p>
+              </div>
+              <span className="shrink-0 rounded bg-white px-2 py-1 text-xs text-ink-500">
+                公开资料
+              </span>
+            </div>
+            <p className="mt-2 text-xs leading-5 text-ink-700">
+              {card.community.publicIntro}
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {card.community.tags.map((tag) => (
+                <span
+                  className="rounded bg-white px-2 py-1 text-xs text-qq-700"
+                  key={tag}
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {sourceVisible ? (
+          <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5 text-ink-600">
+            {card.sourceDetail ?? card.reason}
+          </div>
+        ) : null}
+
+        {applyNoticeVisible ? (
+          <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+            我不会替你提交入群申请。这里先把公开资料放出来，是否进一步查看或申请由你自己决定。
+          </p>
+        ) : null}
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          {card.actions.map((action) => {
+            if (action.id === 'view_source') {
+              return (
+                <button
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-qq-50 px-3 py-1.5 text-xs font-semibold text-qq-700 transition hover:bg-qq-100"
+                  key={action.id}
+                  type="button"
+                  onClick={() => setSourceVisible((visible) => !visible)}
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  {action.label}
+                </button>
+              )
+            }
+
+            if (action.id === 'generate_space_post') {
+              return (
+                <button
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-lobster-50 px-3 py-1.5 text-xs font-semibold text-lobster-700 transition hover:bg-lobster-100"
+                  key={action.id}
+                  type="button"
+                  onClick={() => void onGenerateSpacePost?.()}
+                >
+                  <Share2 className="h-3.5 w-3.5" />
+                  {action.label}
+                </button>
+              )
+            }
+
+            if (action.id === 'favorite') {
+              return (
+                <button
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-ink-600 ring-1 ring-slate-200 transition hover:bg-slate-50"
+                  key={action.id}
+                  type="button"
+                  onClick={() => {
+                    if (!favoriteSaved) {
+                      onFavoriteCommunity?.()
+                    }
+                    setFavoriteSaved(true)
+                  }}
+                >
+                  <Heart className="h-3.5 w-3.5" />
+                  {favoriteSaved ? '已收藏' : action.label}
+                </button>
+              )
+            }
+
+            return (
+              <button
+                className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-ink-600 ring-1 ring-slate-200 transition hover:bg-slate-50"
+                key={action.id}
+                type="button"
+                onClick={() => setApplyNoticeVisible(true)}
+              >
+                <Users className="h-3.5 w-3.5" />
+                {action.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
     </div>
   )
 }
@@ -731,6 +1184,9 @@ function SpacePostCard({
   post,
   compact,
   selected,
+  previewRequired,
+  sourceLabel,
+  sourceType,
   onOpenSpace,
   onSelect,
   onLike,
@@ -740,6 +1196,9 @@ function SpacePostCard({
   post: LobsterSpacePost
   compact?: boolean
   selected?: boolean
+  previewRequired?: boolean
+  sourceLabel?: string
+  sourceType?: InterestNarrativeCardData['sourceType']
   onOpenSpace?: () => void
   onSelect?: (postId: string) => void
   onLike?: (postId: string) => void
@@ -769,12 +1228,18 @@ function SpacePostCard({
                 {post.authorName} 的龙虾空间
               </p>
               <p className="text-xs text-ink-500">
-                {post.kind === 'diary' ? '日记动态' : '成就动态'}
+                {post.kind === 'diary'
+                  ? '日记动态'
+                  : post.kind === 'interest'
+                    ? '兴趣动态'
+                    : post.kind === 'status'
+                      ? '状态动态'
+                      : '成就动态'}
               </p>
             </div>
           </div>
           <span className="rounded bg-white px-2 py-1 text-xs text-qq-700">
-            小龙虾发布
+            {previewRequired ? '用户确认后发布' : '小龙虾发布'}
           </span>
         </div>
       </div>
@@ -782,6 +1247,18 @@ function SpacePostCard({
         <p className="whitespace-pre-line text-sm leading-6 text-ink-900">
           {post.content}
         </p>
+        {sourceLabel || previewRequired ? (
+          <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-5 text-ink-600">
+            {sourceLabel ? (
+              <p>
+                来源类型：{interestSourceTypeLabel(sourceType)} · {sourceLabel}
+              </p>
+            ) : null}
+            {previewRequired ? (
+              <p>发布规则：用户确认后发布，分享前已脱敏。</p>
+            ) : null}
+          </div>
+        ) : null}
         <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-ink-500">
           <span>{likeCount} 赞</span>
           <span>{commentCount} 评论</span>
@@ -976,12 +1453,51 @@ export function LobsterChatView() {
   const replyToSpaceComment = useLobsterStore(
     (state) => state.replyToSpaceComment,
   )
-  const completedCount = completedCheckInIds.length
+  const interestProfiles = useLobsterStore((state) => state.interestProfiles)
+  const musicAuthorizationStatus = useLobsterStore(
+    (state) => state.musicAuthorizationStatus,
+  )
+  const authorizeMockQqMusic = useLobsterStore(
+    (state) => state.authorizeMockQqMusic,
+  )
+  const declineMockQqMusicAuthorization = useLobsterStore(
+    (state) => state.declineMockQqMusicAuthorization,
+  )
+  const showMusicInterestReminder = useLobsterStore(
+    (state) => state.showMusicInterestReminder,
+  )
+  const showInterestSpacePreview = useLobsterStore(
+    (state) => state.showInterestSpacePreview,
+  )
+  const generateInterestSpacePostPreview = useLobsterStore(
+    (state) => state.generateInterestSpacePostPreview,
+  )
+  const publishInterestSpacePostPreview = useLobsterStore(
+    (state) => state.publishInterestSpacePostPreview,
+  )
+  const showInterestCommunity = useLobsterStore(
+    (state) => state.showInterestCommunity,
+  )
+  const saveInterestCommunityCandidate = useLobsterStore(
+    (state) => state.saveInterestCommunityCandidate,
+  )
+  const showInterestMemories = useLobsterStore(
+    (state) => state.showInterestMemories,
+  )
+  const editInterestMemory = useLobsterStore(
+    (state) => state.editInterestMemory,
+  )
+  const deleteInterestMemory = useLobsterStore(
+    (state) => state.deleteInterestMemory,
+  )
   const lastReward = [...lobsterRewards]
     .reverse()
-    .find((reward) => completedCount >= reward.requiredCheckIns)
+    .find((reward) => isRewardUnlocked(reward, completedCheckInIds))
   const unlockedRewards = lobsterRewards.filter(
-    (reward) => completedCount >= reward.requiredCheckIns,
+    (reward) => isRewardUnlocked(reward, completedCheckInIds),
+  )
+  const unlockedInterestRewards = unlockedRewards.filter((reward) =>
+    interestAccessoryIds.has(reward.id),
   )
   const equippedReward =
     unlockedRewards.find((reward) => reward.id === equippedAccessoryId) ??
@@ -994,11 +1510,46 @@ export function LobsterChatView() {
       )
       .map((achievement) => achievement.key),
   )
-  const visibleAchievements = mockAchievements.slice(0, 5)
+  const visibleAchievements = mockAchievements.filter(
+    (achievement) =>
+      !achievement.hidden || unlockedAchievementKeys.has(achievement.key),
+  )
   const unlockedAchievements = mockAchievements.filter((achievement) =>
     unlockedAchievementKeys.has(achievement.key),
   )
   const latestAchievement = [...unlockedAchievements].reverse()[0]
+  const latestInterestAchievement = [...unlockedAchievements]
+    .reverse()
+    .find((achievement) =>
+      [
+        'first_interest_memory',
+        'first_music_signal',
+        'first_interest_space_post',
+        'first_community_card',
+        'community_saved',
+        'safe_distance',
+      ].includes(achievement.key),
+    )
+  const enabledInterestPersonas = Array.from(
+    new Set([
+      ...lobsterProfile.interests.map(interestPersonaLabel),
+      ...interestProfiles.map((profile) =>
+        interestPersonaLabel(profile.interest),
+      ),
+    ]),
+  )
+  const enabledInterestSources = Array.from(
+    new Set(
+      interestProfiles
+        .flatMap((profile) => profile.sources)
+        .map((source) => interestSourceDisplayLabel(source)),
+    ),
+  )
+  const latestInterestAction =
+    latestInterestAchievement?.title ??
+    interestProfiles[0]?.sources[interestProfiles[0].sources.length - 1]
+      ?.title ??
+    (lobsterProfile.interests.length > 0 ? '认养时选择了兴趣' : '还没有兴趣动作')
   const selectedAchievement =
     visibleAchievements.find(
       (achievement) => achievement.key === selectedAchievementKey,
@@ -1015,6 +1566,7 @@ export function LobsterChatView() {
   const rightPanelTabs: Array<{ id: RightPanelTab; label: string }> = [
     { id: 'achievements', label: '成就' },
     { id: 'accessories', label: '挂饰' },
+    { id: 'interests', label: '兴趣' },
     ...(diaryUnlocked ? [{ id: 'diary' as const, label: '日记' }] : []),
   ]
   const activeRightPanelTab =
@@ -1082,7 +1634,10 @@ export function LobsterChatView() {
       return
     }
 
-    if (payload.capability === 'summarize_group') {
+    if (
+      payload.capability === 'summarize_group' ||
+      payload.capability === 'summarize_group_messages'
+    ) {
       void saveGroupPermissions(
         {
           summarizeGroup: true,
@@ -1093,6 +1648,12 @@ export function LobsterChatView() {
         },
         [conversations[0]?.id ?? 'group-ai-camp'],
       )
+      return
+    }
+
+    if (payload.capability === 'open_achievement_wall') {
+      openLobsterChat()
+      setRightPanelTab('achievements')
       return
     }
 
@@ -1108,6 +1669,33 @@ export function LobsterChatView() {
 
     if (payload.capability === 'space_post') {
       void generateSpacePost()
+      return
+    }
+
+    if (payload.capability === 'interest_memory') {
+      showInterestMemories()
+      return
+    }
+
+    if (payload.capability === 'interest_music_reminder') {
+      void showMusicInterestReminder()
+      return
+    }
+
+    if (payload.capability === 'interest_space_preview') {
+      void showInterestSpacePreview()
+      return
+    }
+
+    if (payload.capability === 'publish_interest_space_post') {
+      void publishInterestSpacePostPreview(
+        typeof payload.postId === 'string' ? payload.postId : '',
+      )
+      return
+    }
+
+    if (payload.capability === 'interest_community') {
+      void showInterestCommunity()
       return
     }
 
@@ -1224,11 +1812,64 @@ export function LobsterChatView() {
       )
     }
 
+    if (line.card.type === 'music_authorization_card') {
+      return (
+        <MusicAuthorizationCard
+          status={line.card.status}
+          disabled={sending}
+          onAuthorize={() => void authorizeMockQqMusic()}
+          onDecline={declineMockQqMusicAuthorization}
+        />
+      )
+    }
+
+    if (line.card.type === 'interest_memory_card') {
+      return (
+        <InterestMemoryCard
+          profile={line.card.profile}
+          receipt={line.card.receipt}
+          disabled={sending}
+          onEdit={(interest) => void editInterestMemory(interest)}
+          onDelete={(interest) => void deleteInterestMemory(interest)}
+        />
+      )
+    }
+
+    if (line.card.type === 'interest_risk_confirmation_card') {
+      return (
+        <InterestRiskConfirmationCard
+          title={line.card.title}
+          reason={line.card.reason}
+          evidenceText={line.card.evidenceText}
+        />
+      )
+    }
+
+    if (
+      line.card.type === 'interest_reminder' ||
+      line.card.type === 'interest_community'
+    ) {
+      return (
+        <InterestNarrativeCard
+          card={line.card}
+          onFavoriteCommunity={saveInterestCommunityCandidate}
+          onGenerateSpacePost={generateInterestSpacePostPreview}
+        />
+      )
+    }
+
+    if (line.card.type !== 'space_post_card') {
+      return null
+    }
+
     return (
       <SpacePostCard
         post={line.card.post}
         compact
         selected={line.card.post.id === effectiveSelectedSpacePostId}
+        previewRequired={line.card.previewRequired}
+        sourceLabel={line.card.sourceLabel}
+        sourceType={line.card.sourceType}
         onOpenSpace={() => void openLobsterSpace()}
       />
     )
@@ -1369,6 +2010,7 @@ export function LobsterChatView() {
       ) : null}
       {activeAchievementMoment ? (
         <AchievementMomentOverlay
+          key={activeAchievementMoment.id}
           moment={activeAchievementMoment}
           onDone={markAchievementMomentSeen}
         />
@@ -1747,6 +2389,7 @@ export function LobsterChatView() {
                           key={achievement.key}
                           type="button"
                           aria-label={`${label}，${tooltip}`}
+                          data-achievement-key={achievement.key}
                           onClick={() => setSelectedAchievementKey(achievement.key)}
                         >
                           <Sparkles
@@ -1820,7 +2463,10 @@ export function LobsterChatView() {
                   </div>
                   <div className="mt-3 space-y-2">
                     {lobsterRewards.map((reward) => {
-                      const unlocked = completedCount >= reward.requiredCheckIns
+                      const unlocked = isRewardUnlocked(
+                        reward,
+                        completedCheckInIds,
+                      )
                       const equipped = equippedReward?.id === reward.id
                       return (
                         <button
@@ -1876,6 +2522,180 @@ export function LobsterChatView() {
                       )
                     })}
                   </div>
+                </div>
+              ) : null}
+
+              {activeRightPanelTab === 'interests' ? (
+                <div className="mt-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <Bell className="h-4 w-4 text-qq-600" />
+                      <p className="text-sm font-semibold text-ink-900">
+                        兴趣状态
+                      </p>
+                    </div>
+                    <span className="rounded bg-qq-50 px-2 py-1 text-xs text-qq-700">
+                      {enabledInterestPersonas.length}
+                    </span>
+                  </div>
+                  <div className="mt-3 space-y-3">
+                    <div className="rounded-lg border border-qq-100 bg-qq-50 px-3 py-3">
+                      <p className="text-xs font-semibold text-qq-700">
+                        兴趣人格
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {enabledInterestPersonas.map((persona) => (
+                          <span
+                            className="rounded bg-white px-2 py-1 text-xs font-semibold text-ink-700"
+                            key={persona}
+                          >
+                            {persona}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <div className="rounded-lg bg-slate-50 px-3 py-3">
+                        <p className="text-xs font-semibold text-ink-700">
+                          已启用来源
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-ink-500">
+                          {enabledInterestSources.length > 0
+                            ? enabledInterestSources.join('、')
+                            : '认养兴趣标签'}
+                        </p>
+                      </div>
+                      <div className="rounded-lg bg-slate-50 px-3 py-3">
+                        <p className="text-xs font-semibold text-ink-700">
+                          最近兴趣动作
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-ink-500">
+                          {latestInterestAction}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-slate-200 bg-white px-3 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-xs font-semibold text-ink-700">
+                          兴趣挂饰
+                        </p>
+                        <span className="rounded bg-slate-50 px-2 py-1 text-xs text-ink-500">
+                          {unlockedInterestRewards.length}
+                        </span>
+                      </div>
+                      {unlockedInterestRewards.length > 0 ? (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {unlockedInterestRewards.map((reward) => (
+                            <button
+                              className={[
+                                'inline-flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs font-semibold transition',
+                                equippedReward?.id === reward.id
+                                  ? 'bg-qq-50 text-qq-700 ring-1 ring-qq-100'
+                                  : 'bg-slate-50 text-ink-600 hover:bg-qq-50 hover:text-qq-700',
+                              ].join(' ')}
+                              key={reward.id}
+                              type="button"
+                              onClick={() => equipAccessory(reward.id)}
+                            >
+                              <AccessoryPreview
+                                rewardId={reward.id}
+                                selected={equippedReward?.id === reward.id}
+                                unlocked
+                              />
+                              {reward.title}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-2 text-xs leading-5 text-ink-500">
+                          生成音乐提醒或发现同好群后会解锁。
+                        </p>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-xs font-semibold text-ink-700">
+                          兴趣记忆
+                        </p>
+                        <span className="rounded bg-slate-50 px-2 py-1 text-xs text-ink-500">
+                          {interestProfiles.length}
+                        </span>
+                      </div>
+                      <div className="mt-2 space-y-2">
+                    {interestProfiles.length === 0 ? (
+                      <div className="rounded-lg bg-slate-50 px-3 py-3 text-xs leading-5 text-ink-500">
+                        还没有具体兴趣画像。自然聊天里提到低风险偏好后，我会给回执并记下来。
+                      </div>
+                    ) : (
+                      interestProfiles.map((profile) => {
+                        const source = profile.sources[profile.sources.length - 1]
+                        return (
+                          <div
+                            className="rounded-lg border border-slate-200 bg-white px-3 py-3"
+                            key={profile.id}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-ink-900">
+                                  {interestLabel(profile.interest)}
+                                </p>
+                                <p className="mt-1 line-clamp-2 text-xs leading-5 text-ink-500">
+                                  {profile.topics.join('、') || '暂未记录关键词'}
+                                </p>
+                              </div>
+                              <span className="shrink-0 rounded bg-slate-50 px-2 py-1 text-xs text-ink-500">
+                                已记录
+                              </span>
+                            </div>
+                            <p className="mt-2 text-xs leading-5 text-ink-500">
+                              来源：{source?.title ?? '未知来源'}
+                            </p>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <button
+                                className="rounded-lg bg-qq-50 px-3 py-1.5 text-xs font-semibold text-qq-700 transition hover:bg-qq-100"
+                                type="button"
+                                onClick={showInterestMemories}
+                              >
+                                查看
+                              </button>
+                              <button
+                                className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-qq-700 ring-1 ring-qq-100 transition hover:bg-qq-50"
+                                type="button"
+                                onClick={() =>
+                                  void editInterestMemory(profile.interest)
+                                }
+                              >
+                                修改
+                              </button>
+                              <button
+                                className="rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-red-600 ring-1 ring-red-100 transition hover:bg-red-50"
+                                type="button"
+                                onClick={() =>
+                                  void deleteInterestMemory(profile.interest)
+                                }
+                              >
+                                删除
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      })
+                    )}
+                      </div>
+                    </div>
+                  </div>
+                  {musicAuthorizationStatus === 'pending' ? (
+                    <button
+                      className="mt-3 w-full rounded-lg bg-qq-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-qq-600"
+                      type="button"
+                      onClick={showInterestMemories}
+                    >
+                      先查看兴趣状态
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
 

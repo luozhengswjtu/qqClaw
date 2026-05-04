@@ -47,6 +47,35 @@ function mockOutput(type, input) {
         .filter(Boolean)
         .join('\n')
     }
+    if (input.context?.type === 'private_chat') {
+      const profiles = Array.isArray(input.context.interestProfiles)
+        ? input.context.interestProfiles
+        : []
+      const musicProfile = profiles.find((profile) => profile.interest === 'music')
+      const badmintonProfile = profiles.find(
+        (profile) => profile.interest === 'badminton',
+      )
+      if (
+        input.context.userSignal === 'low_energy' &&
+        musicProfile?.topics?.length
+      ) {
+        return [
+          '那我今天不塞太多消息给你。',
+          `我记得你最近在听${musicProfile.topics[0]}，晚点可以给你夹一首适合放空的歌。`,
+        ].join('')
+      }
+
+      if (input.context.userSignal === 'interest_related') {
+        const profile = musicProfile ?? badmintonProfile ?? profiles[0]
+        if (profile) {
+          return [
+            `我记得你这里有一条${profile.label || '兴趣'}记忆`,
+            profile.topics?.length ? `：${profile.topics.slice(0, 2).join('、')}` : '',
+            '。我先按同好聊天的口吻陪你聊，不把它说成广告。',
+          ].join('')
+        }
+      }
+    }
     return [
       '我先按演示模式回答：我还没有接入真实 QQ 消息，但这句话已经经过 OpenClaw 记录。',
       lastMessage ? `你刚刚说的是：“${lastMessage}”。` : '',
@@ -122,6 +151,7 @@ function buildMessages(type, input, prompt) {
     '你是 QQ 里的小龙虾 Agent。',
     '你不能声称已经读取未授权的真实 QQ 消息。',
     '回答要短，适合出现在 QQ 聊天窗口里。',
+    '如果 reference context 里有兴趣画像，可以自然引用，但不要每句话都提，也不要像广告。',
     prompt,
   ].join('\n')
   const referenceContext = input.context
