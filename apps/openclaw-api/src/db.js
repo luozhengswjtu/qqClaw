@@ -418,6 +418,113 @@ function getMockQqMusicAuthorization() {
   }
 }
 
+function getMockQqMusicListeningSnapshot() {
+  return {
+    sourceLabel: '模拟 QQ 音乐实时歌单快照',
+    syncedAt: '2026-05-06T20:18:00.000+08:00',
+    recentPlays: [
+      {
+        title: '不为谁而作的歌',
+        artist: '林俊杰',
+        playedAt: '今天 20:12',
+        playlist: '最近循环最多',
+        listenType: 'recent_play',
+        moodTag: '慢慢放松',
+      },
+      {
+        title: '可惜没如果',
+        artist: '林俊杰',
+        playedAt: '今天 19:48',
+        playlist: '最近循环最多',
+        listenType: 'loop',
+        moodTag: '有点低落',
+      },
+      {
+        title: '晴天',
+        artist: '周杰伦',
+        playedAt: '今天 18:36',
+        playlist: '老歌翻红收藏',
+        listenType: 'favorite',
+        moodTag: '旧歌回听',
+      },
+      {
+        title: '群青',
+        artist: 'YOASOBI',
+        playedAt: '昨天 23:10',
+        playlist: '晚上写代码用',
+        listenType: 'recent_play',
+        moodTag: '提神',
+      },
+      {
+        title: 'Lemon',
+        artist: '米津玄师',
+        playedAt: '昨天 22:42',
+        playlist: '晚上写代码用',
+        listenType: 'recent_play',
+        moodTag: '安静回落',
+      },
+    ],
+    playlists: [
+      {
+        name: '最近循环最多',
+        trackCount: 28,
+        updatedAt: '今天 20:15',
+        highlights: ['林俊杰', '周杰伦', '情绪慢歌'],
+        note: '今晚林俊杰相关歌曲出现最密集。',
+      },
+      {
+        name: '晚上写代码用',
+        trackCount: 42,
+        updatedAt: '昨天 23:30',
+        highlights: ['日摇', '日音', '轻摇滚'],
+        note: '夜间更常打开，适合聊提神和沉浸感。',
+      },
+      {
+        name: '老歌翻红收藏',
+        trackCount: 35,
+        updatedAt: '今天 18:40',
+        highlights: ['周杰伦', '林俊杰', '校园感'],
+        note: '收藏歌单里旧歌回听明显。',
+      },
+    ],
+    loopSignals: [
+      {
+        title: '可惜没如果',
+        artist: '林俊杰',
+        count: 4,
+        window: '近 6 小时',
+      },
+      {
+        title: '晴天',
+        artist: '周杰伦',
+        count: 3,
+        window: '近 24 小时',
+      },
+    ],
+    topArtists: [
+      {
+        name: '林俊杰',
+        reason: '近 7 天播放最多，今晚也连续出现在最近播放里。',
+      },
+      {
+        name: '周杰伦',
+        reason: '收藏歌单占比高，旧歌回听明显。',
+      },
+      {
+        name: 'YOASOBI / 米津玄师',
+        reason: '夜间歌单里出现频繁，偏日音和日摇情绪线。',
+      },
+    ],
+    listeningTrend:
+      '今晚更偏林俊杰的情绪慢歌，老歌回听比新歌探索多一点，夜间歌单带一点日音和轻摇滚。',
+    chatSuggestions: [
+      '从最近循环的林俊杰聊起，问用户今天是不是更想听慢歌。',
+      '根据“老歌翻红收藏”聊周杰伦旧歌为什么容易回听。',
+      '从夜间日音歌单切入，聊写代码时适合的提神曲风。',
+    ],
+  }
+}
+
 function getMockQqMusicSignals(profile) {
   const authorization = getMockQqMusicAuthorization()
   if (!authorization.authorized) {
@@ -425,15 +532,18 @@ function getMockQqMusicSignals(profile) {
       authorizationStatus: 'not_authorized',
       sourceLabel: authorization.sourceLabel,
       signals: [],
+      listeningSnapshot: null,
     }
   }
 
   const topics = profile?.topics?.length ? profile.topics : ['林俊杰', '周杰伦']
   const city = profile?.city || '深圳'
+  const listeningSnapshot = getMockQqMusicListeningSnapshot()
 
   return {
     authorizationStatus: 'authorized',
     sourceLabel: authorization.sourceLabel,
+    listeningSnapshot,
     signals: [
       {
         id: 'mock-music-signal-jj-lin-shenzhen',
@@ -450,7 +560,7 @@ function getMockQqMusicSignals(profile) {
         id: 'mock-music-signal-playlist',
         interest: 'music',
         title: '常听风格可以整理',
-        summary: `最近可以把${topics.slice(0, 3).join('、')}放进音乐简报。`,
+        summary: `最近播放和歌单快照里，${topics.slice(0, 3).join('、')}出现频繁。`,
         topics,
         city,
         sourceType: 'qq_music',
@@ -2967,7 +3077,7 @@ export function authorizeMockQqMusic() {
         permissionNote:
           'Demo 使用模拟 QQ 音乐授权数据，只用于生成音乐提醒、兴趣日记素材、龙虾空间动态草稿和兴趣成就。',
         evidenceText:
-          '用户在 Demo 中确认授权模拟 QQ 音乐，并表达过关注林俊杰、周杰伦和日摇。',
+          '用户在 Demo 中确认授权模拟 QQ 音乐；实时歌单快照显示最近播放包含林俊杰、周杰伦和日音歌单。',
       },
     ],
     reminderFrequency: 'important_only',

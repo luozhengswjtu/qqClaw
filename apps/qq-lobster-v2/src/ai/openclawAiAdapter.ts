@@ -1,5 +1,10 @@
 import { openclawClient } from '../api/openclawClient'
-import type { LobsterChatContext, LobsterProfile } from '../types'
+import { mockQqMusicListeningSnapshot } from '../data/mockData'
+import type {
+  LobsterChatContext,
+  LobsterProfile,
+  MusicListeningSnapshot,
+} from '../types'
 import { mockAiAdapter, type AdoptionInput } from './mockAiAdapter'
 
 type LobsterStreamMode = 'normal' | 'slow'
@@ -30,13 +35,34 @@ function createCapabilityOverview(profile: LobsterProfile) {
   ].join('\n')
 }
 
+function formatMusicSnapshotForChat(snapshot: MusicListeningSnapshot) {
+  const recent = snapshot.recentPlays
+    .slice(0, 3)
+    .map((play) => `《${play.title}》-${play.artist}`)
+    .join('、')
+  const playlist = snapshot.playlists[0]
+  const loop = snapshot.loopSignals[0]
+
+  return [
+    `我这边有一份${snapshot.sourceLabel}，不用空聊。`,
+    recent ? `最近播放里最靠前的是${recent}。` : '',
+    playlist
+      ? `收藏/歌单这边，「${playlist.name}」刚更新过，重点偏${playlist.highlights.join('、')}。`
+      : '',
+    loop
+      ? `循环信号也挺明显：${loop.window}里《${loop.title}》听了 ${loop.count} 次。`
+      : '',
+    `所以今天可以先从“${snapshot.chatSuggestions[0]}”这个方向聊。`,
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
 function createMusicChatReply(profile: LobsterProfile) {
   return [
-    '我会记得你不是只把音乐当背景音的人。像林俊杰、周杰伦，还有一点日摇那种情绪线，都更像是陪你把状态慢慢放下来。',
+    formatMusicSnapshotForChat(mockQqMusicListeningSnapshot),
     '',
-    '如果聊到新歌、演出或者某句歌词，我会先按同好聊天的方式接住：说说我听到的感觉，再帮你把真正重要的动态夹进记录里。',
-    '',
-    `你可以继续给${profile.name}丢一首歌名，或者直接说最近哪句歌词卡在心里。`,
+    `你可以继续让${profile.name}按最近播放、收藏歌单或循环最多的歌往下聊。`,
   ].join('\n')
 }
 
@@ -46,14 +72,21 @@ function createMusicChatContext(input: {
 }): LobsterChatContext | undefined {
   const guidance =
     '音乐话题按同好聊天方式自然回应，先接住情绪和偏好，不要直接推功能。'
+  const snapshotGuidance =
+    '已授权的模拟 QQ 音乐实时歌单快照可用；可以引用最近播放、收藏歌单和循环记录，不要说没有歌单或播放记录。'
 
   if (input.context?.type === 'private_chat') {
+    const guidanceList = [guidance, snapshotGuidance].reduce<string[]>(
+      (items, item) => (items.includes(item) ? items : [...items, item]),
+      input.context.guidance,
+    )
+
     return {
       ...input.context,
       userSignal: 'interest_related',
-      guidance: input.context.guidance.includes(guidance)
-        ? input.context.guidance
-        : [...input.context.guidance, guidance],
+      guidance: guidanceList,
+      musicListeningSnapshot:
+        input.context.musicListeningSnapshot ?? mockQqMusicListeningSnapshot,
     }
   }
 
@@ -79,7 +112,9 @@ function createMusicChatContext(input: {
     guidance: [
       '可以自然接住音乐偏好和情绪，不要每句都推功能。',
       '如果引用来源，要说明来自当前私聊或用户授权兴趣。',
+      snapshotGuidance,
     ],
+    musicListeningSnapshot: mockQqMusicListeningSnapshot,
   }
 }
 

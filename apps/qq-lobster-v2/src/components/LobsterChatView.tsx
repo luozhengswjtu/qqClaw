@@ -5,6 +5,7 @@ import {
   ExternalLink,
   FileText,
   Heart,
+  Headphones,
   MessageSquare,
   MoreHorizontal,
   Music,
@@ -43,6 +44,34 @@ import type {
 import { AchievementMomentOverlay } from './AchievementMomentOverlay'
 import { LobsterAvatar } from './LobsterAvatar'
 
+const headsetLobsterImage = new URL(
+  '../assets/lobster/xingxiang-erji.png',
+  import.meta.url,
+).href
+const flagLobsterImage = new URL(
+  '../assets/lobster/xingxiang-xiaohongqi.png',
+  import.meta.url,
+).href
+const musicLobsterImage = new URL(
+  '../assets/lobster/xingxiang-yinfu.png',
+  import.meta.url,
+).href
+
+const accessoryAvatarImages: Record<string, { alt: string; src: string }> = {
+  'tiny-flag': {
+    alt: '戴小红旗的小龙虾',
+    src: flagLobsterImage,
+  },
+  'music-note': {
+    alt: '戴小音符的小龙虾',
+    src: musicLobsterImage,
+  },
+  'shell-badge': {
+    alt: '戴耳机的小龙虾',
+    src: headsetLobsterImage,
+  },
+}
+
 const chatStatusLabel: Record<
   NonNullable<LobsterChatLine['status']>,
   string
@@ -66,28 +95,31 @@ const capabilityDrafts: Record<string, string> = {
   interest_community: '小钳，帮我看看有没有公开资料里的同好群',
 }
 
+const musicTopicDrafts = [
+  '小钳，你已经拿到 QQ 音乐授权了，先从我最近循环最多的几首歌聊起吧',
+  '小钳，看看我最近常听的歌和收藏歌单，帮我挑一个今天适合继续聊的音乐话题',
+  '小钳，根据我最近听歌的变化，和我聊聊现在最像我心情的一首歌',
+  '小钳，结合我喜欢的歌手和最近播放记录，给我找一个可以继续深聊的音乐切入点',
+  '小钳，按我最近在 QQ 音乐里的偏好，聊聊我可能会喜欢的相似歌手或新歌',
+]
+
 type RightPanelTab = 'achievements' | 'accessories' | 'interests' | 'diary'
 
 const equippedAccessoryStorageKey = 'qqclaw.equippedAccessoryId.v1'
-const interestAccessoryIds = new Set([
-  'music-note',
-  'badminton-racket',
-  'lookout-shell',
-])
+const interestAccessoryIds = new Set(['music-note'])
 
 const maxPermissionGroupCount = 3
 const defaultSummaryScheduleTime = '21:30'
 const achievementExperienceDrafts: Record<string, string> = {
   first_claw_touch: '小钳，你好呀，介绍你自己',
   first_group_signal: '小钳，帮我设置一个群聊总结提醒',
-  first_work_log: '小钳，今天你都做了什么',
   first_space_post: '小钳，帮你发一条龙虾空间动态吧',
   first_space_reply: '小钳，我们去龙虾空间看看评论',
-  first_interest_memory: '小钳，看看你记住了我的什么兴趣',
-  first_music_signal: '小钳，给我讲讲最近的音乐动态',
-  first_interest_space_post: '小钳，把音乐动态生成一条空间动态',
-  first_community_card: '小钳，帮我看看有没有公开资料里的同好群',
   community_saved: '小钳，帮我看看有没有公开资料里的同好群，我想先收藏一下',
+  first_diary_view: '小钳，打开第一条日记',
+  first_skill_install: '小钳，帮我安装音乐小技能',
+  first_interest_feed_view: '小钳，给我讲讲最近的音乐动态',
+  interest_topic_streak_3: '我最近在听林俊杰、周杰伦和日摇',
 }
 
 function isLegacyInterestSpacePublishSuggestion(suggestion: LobsterSuggestion) {
@@ -161,22 +193,8 @@ function AccessoryPreview({
   if (rewardId === 'shell-badge') {
     return (
       <span className={frameClass} aria-hidden="true">
-        <span className="relative grid h-8 w-8 place-items-center rounded-full border border-cyan-200 bg-gradient-to-br from-cyan-100 via-white to-emerald-200 shadow-inner">
-          <Sparkles className="h-4 w-4 text-cyan-600" />
-          <span className="absolute inset-x-2 bottom-2 h-px bg-cyan-300" />
-        </span>
-      </span>
-    )
-  }
-
-  if (rewardId === 'logbook') {
-    return (
-      <span className={frameClass} aria-hidden="true">
-        <span className="relative h-8 w-7 rounded border border-slate-300 bg-white/90 shadow-sm">
-          <span className="absolute inset-y-1 left-1 w-1 rounded bg-qq-200" />
-          <span className="absolute left-3 right-1 top-2 h-px bg-slate-300" />
-          <span className="absolute left-3 right-1 top-4 h-px bg-slate-200" />
-          <span className="absolute left-3 right-2 top-6 h-px bg-slate-200" />
+        <span className="grid h-8 w-8 place-items-center rounded-full border border-indigo-200 bg-indigo-50 shadow-inner">
+          <Headphones className="h-5 w-5 text-indigo-600" />
         </span>
       </span>
     )
@@ -199,29 +217,6 @@ function AccessoryPreview({
       <span className={frameClass} aria-hidden="true">
         <span className="grid h-8 w-8 place-items-center rounded-full border border-fuchsia-200 bg-fuchsia-50">
           <Music className="h-5 w-5 text-fuchsia-600" />
-        </span>
-      </span>
-    )
-  }
-
-  if (rewardId === 'badminton-racket') {
-    return (
-      <span className={frameClass} aria-hidden="true">
-        <span className="relative h-8 w-8">
-          <span className="absolute left-2 top-0 h-5 w-5 rotate-12 rounded-full border-2 border-emerald-400 bg-emerald-50" />
-          <span className="absolute bottom-1 left-4 h-5 w-1 -rotate-45 rounded bg-amber-700" />
-          <span className="absolute bottom-2 right-0 h-2 w-2 rounded-full bg-white ring-1 ring-slate-300" />
-        </span>
-      </span>
-    )
-  }
-
-  if (rewardId === 'lookout-shell') {
-    return (
-      <span className={frameClass} aria-hidden="true">
-        <span className="relative grid h-8 w-8 place-items-center rounded-full border border-teal-200 bg-teal-50">
-          <span className="h-5 w-6 rounded-t-full border-x border-t border-teal-400 bg-white" />
-          <span className="absolute bottom-2 h-px w-5 bg-teal-300" />
         </span>
       </span>
     )
@@ -259,25 +254,11 @@ function AccessoryOnAvatar({ rewardId }: { rewardId?: string }) {
   if (rewardId === 'shell-badge') {
     return (
       <span
-        className="absolute right-8 bottom-2 grid h-5 w-5 place-items-center rounded-full border border-cyan-200 bg-white shadow-sm"
-        aria-label="亮晶晶虾壳"
-        title="亮晶晶虾壳"
+        className="absolute right-8 top-2 grid h-6 w-6 place-items-center rounded-full border border-indigo-200 bg-white shadow-sm"
+        aria-label="耳机挂饰"
+        title="耳机挂饰"
       >
-        <Sparkles className="h-3 w-3 text-cyan-600" />
-      </span>
-    )
-  }
-
-  if (rewardId === 'logbook') {
-    return (
-      <span
-        className="absolute right-8 bottom-2 h-6 w-5 rounded border border-slate-300 bg-white shadow-sm"
-        aria-label="透明工作簿"
-        title="透明工作簿"
-      >
-        <span className="absolute inset-y-1 left-1 w-0.5 rounded bg-qq-200" />
-        <span className="absolute left-2.5 right-1 top-2 h-px bg-slate-300" />
-        <span className="absolute left-2.5 right-1 top-3.5 h-px bg-slate-200" />
+        <Headphones className="h-3.5 w-3.5 text-indigo-600" />
       </span>
     )
   }
@@ -303,31 +284,6 @@ function AccessoryOnAvatar({ rewardId }: { rewardId?: string }) {
         title="小音符挂饰"
       >
         <Music className="h-3.5 w-3.5 text-fuchsia-600" />
-      </span>
-    )
-  }
-
-  if (rewardId === 'badminton-racket') {
-    return (
-      <span
-        className="absolute right-8 bottom-2 h-7 w-7"
-        aria-label="小球拍挂饰"
-        title="小球拍挂饰"
-      >
-        <span className="absolute left-1 top-0 h-4 w-4 rotate-12 rounded-full border-2 border-emerald-400 bg-white shadow-sm" />
-        <span className="absolute bottom-1 left-4 h-4 w-1 -rotate-45 rounded bg-amber-700 shadow-sm" />
-      </span>
-    )
-  }
-
-  if (rewardId === 'lookout-shell') {
-    return (
-      <span
-        className="absolute right-8 bottom-2 grid h-5 w-6 place-items-center rounded-t-full border border-teal-200 bg-white shadow-sm"
-        aria-label="安全距离贴纸"
-        title="安全距离贴纸"
-      >
-        <span className="h-2 w-4 rounded-t-full bg-teal-100" />
       </span>
     )
   }
@@ -756,7 +712,7 @@ function MusicSkillSuggestionCard({
   disabled,
   onInstall,
   onTalkMusic,
-  onExploreFeatures,
+  onSummarizeGroup,
 }: {
   title: string
   summary: string
@@ -767,7 +723,7 @@ function MusicSkillSuggestionCard({
   disabled: boolean
   onInstall: () => void
   onTalkMusic: () => void
-  onExploreFeatures: () => void
+  onSummarizeGroup: () => void
 }) {
   return (
     <div className="mt-3 rounded-lg border border-fuchsia-100 bg-fuchsia-50 p-4">
@@ -826,10 +782,10 @@ function MusicSkillSuggestionCard({
                 className="inline-flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-fuchsia-700 ring-1 ring-fuchsia-100 transition hover:bg-fuchsia-50 disabled:cursor-not-allowed disabled:text-slate-300 disabled:ring-slate-100"
                 type="button"
                 disabled={disabled}
-                onClick={onExploreFeatures}
+                onClick={onSummarizeGroup}
               >
-                <Sparkles className="h-3.5 w-3.5" />
-                探索新功能
+                <FileText className="h-3.5 w-3.5" />
+                群聊总结
               </button>
             </div>
           </div>
@@ -1647,6 +1603,7 @@ export function LobsterChatView() {
   )
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const draftInputRef = useRef<HTMLTextAreaElement | null>(null)
+  const lastMusicTopicDraftIndexRef = useRef<number | null>(null)
   const lobsterProfile = useLobsterStore((state) => state.lobsterProfile)
   const chatLines = useLobsterStore((state) => state.lobsterChatLines)
   const sending = useLobsterStore((state) => state.lobsterChatBusy)
@@ -1751,6 +1708,9 @@ export function LobsterChatView() {
     unlockedRewards.find((reward) => reward.id === equippedAccessoryId) ??
     lastReward ??
     null
+  const equippedAccessoryAvatar = equippedReward
+    ? accessoryAvatarImages[equippedReward.id]
+    : undefined
   const unlockedAchievementKeys = new Set(
     mockAchievements
       .filter((achievement) =>
@@ -1770,12 +1730,9 @@ export function LobsterChatView() {
     .reverse()
     .find((achievement) =>
       [
-        'first_interest_memory',
-        'first_music_signal',
-        'first_interest_space_post',
-        'first_community_card',
         'community_saved',
-        'safe_distance',
+        'first_interest_feed_view',
+        'interest_topic_streak_3',
       ].includes(achievement.key),
     )
   const enabledInterestPersonas = Array.from(
@@ -1861,6 +1818,31 @@ export function LobsterChatView() {
       input?.focus()
       input?.setSelectionRange(content.length, content.length)
     })
+  }
+
+  function getNextMusicTopicDraftIndex(previousIndex: number | null) {
+    if (musicTopicDrafts.length <= 1) {
+      return 0
+    }
+
+    if (
+      previousIndex === null ||
+      previousIndex < 0 ||
+      previousIndex >= musicTopicDrafts.length
+    ) {
+      return Math.floor(Math.random() * musicTopicDrafts.length)
+    }
+
+    const nextIndex = Math.floor(Math.random() * (musicTopicDrafts.length - 1))
+    return nextIndex >= previousIndex ? nextIndex + 1 : nextIndex
+  }
+
+  function prefillMusicTopicDraft() {
+    const nextIndex = getNextMusicTopicDraftIndex(
+      lastMusicTopicDraftIndexRef.current,
+    )
+    lastMusicTopicDraftIndexRef.current = nextIndex
+    prefillDraft(musicTopicDrafts[nextIndex])
   }
 
   function prefillCapabilityDraft(capability: unknown, fallback: string) {
@@ -2126,10 +2108,10 @@ export function LobsterChatView() {
           successMessage={line.card.successMessage}
           disabled={sending || line.card.status === 'installing'}
           onInstall={() => void installMusicSkills()}
-          onTalkMusic={() =>
-            prefillDraft('小钳，最近我喜欢的歌手有什么新动态？')
+          onTalkMusic={prefillMusicTopicDraft}
+          onSummarizeGroup={() =>
+            prefillDraft('小钳，帮我总结一下最近群聊里大家讨论的重点')
           }
-          onExploreFeatures={() => prefillDraft('小钳，给我讲讲最近的音乐动态')}
         />
       )
     }
@@ -2156,7 +2138,10 @@ export function LobsterChatView() {
       )
     }
 
-    if (line.card.type === 'interest_community') {
+    if (
+      line.card.type === 'interest_reminder' ||
+      line.card.type === 'interest_community'
+    ) {
       return (
         <InterestNarrativeCard
           card={line.card}
@@ -2633,8 +2618,24 @@ export function LobsterChatView() {
             <section className="rounded-lg border border-qq-100 bg-qq-50 px-4 py-4">
               <div className="flex items-center gap-3">
                 <div className="relative shrink-0">
-                  <LobsterAvatar size="md" mood={lobsterProfile.mood} animated />
-                  <AccessoryOnAvatar rewardId={equippedReward?.id} />
+                  {equippedAccessoryAvatar ? (
+                    <span className="grid h-20 w-20 place-items-center">
+                      <img
+                        className="h-24 w-24 max-w-none object-contain"
+                        src={equippedAccessoryAvatar.src}
+                        alt={equippedAccessoryAvatar.alt}
+                      />
+                    </span>
+                  ) : (
+                    <>
+                      <LobsterAvatar
+                        size="md"
+                        mood={lobsterProfile.mood}
+                        animated
+                      />
+                      <AccessoryOnAvatar rewardId={equippedReward?.id} />
+                    </>
+                  )}
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
@@ -2973,7 +2974,7 @@ export function LobsterChatView() {
                         </div>
                       ) : (
                         <p className="mt-2 text-xs leading-5 text-ink-500">
-                          生成音乐提醒或发现同好群后会解锁。
+                          收藏推荐 QQ 群后会解锁。
                         </p>
                       )}
                     </div>

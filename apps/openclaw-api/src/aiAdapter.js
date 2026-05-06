@@ -27,6 +27,39 @@ export function getAiStatus() {
   }
 }
 
+function formatMusicPlay(play) {
+  if (!play?.title && !play?.artist) {
+    return ''
+  }
+
+  return `《${play.title || '最近播放'}》-${play.artist || '未知歌手'}`
+}
+
+function createMusicSnapshotReply(snapshot) {
+  const recentPlays = Array.isArray(snapshot?.recentPlays)
+    ? snapshot.recentPlays.slice(0, 3).map(formatMusicPlay).filter(Boolean)
+    : []
+  const playlist = Array.isArray(snapshot?.playlists) ? snapshot.playlists[0] : null
+  const loop = Array.isArray(snapshot?.loopSignals) ? snapshot.loopSignals[0] : null
+  const suggestion = Array.isArray(snapshot?.chatSuggestions)
+    ? snapshot.chatSuggestions[0]
+    : ''
+
+  return [
+    `我这边有${snapshot?.sourceLabel || '模拟 QQ 音乐授权快照'}，可以直接按最近听歌聊。`,
+    recentPlays.length ? `最近播放靠前的是${recentPlays.join('、')}。` : '',
+    playlist
+      ? `歌单「${playlist.name}」刚更新过，重点偏${playlist.highlights?.join('、') || '你常听的方向'}。`
+      : '',
+    loop
+      ? `循环记录里，《${loop.title}》在${loop.window}听了 ${loop.count} 次。`
+      : '',
+    suggestion ? `我会先按这个切入：${suggestion}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
 function mockOutput(type, input) {
   if (type === 'chat') {
     const rawLastMessage = Array.isArray(input.messages)
@@ -55,6 +88,17 @@ function mockOutput(type, input) {
       const badmintonProfile = profiles.find(
         (profile) => profile.interest === 'badminton',
       )
+      const musicSnapshot = input.context.musicListeningSnapshot
+      if (
+        musicProfile &&
+        Array.isArray(musicSnapshot?.recentPlays) &&
+        musicSnapshot.recentPlays.length &&
+        (input.context.userSignal === 'low_energy' ||
+          input.context.userSignal === 'interest_related')
+      ) {
+        return createMusicSnapshotReply(musicSnapshot)
+      }
+
       if (
         input.context.userSignal === 'low_energy' &&
         musicProfile?.topics?.length
@@ -152,6 +196,7 @@ function buildMessages(type, input, prompt) {
     '你不能声称已经读取未授权的真实 QQ 消息。',
     '回答要短，适合出现在 QQ 聊天窗口里。',
     '如果 reference context 里有兴趣画像，可以自然引用，但不要每句话都提，也不要像广告。',
+    '如果 reference context 带有 musicListeningSnapshot，它代表用户已授权的模拟 QQ 音乐实时歌单快照；可以引用最近播放、收藏歌单和循环记录，不要说没有歌单或播放记录。',
     prompt,
   ].join('\n')
   const referenceContext = input.context

@@ -11,6 +11,7 @@ import {
   lobsterCheckIns,
   messages,
   mockAchievements,
+  mockQqMusicListeningSnapshot,
 } from '../data/mockData'
 import type {
   Achievement,
@@ -162,10 +163,12 @@ interface LobsterAppState {
 type LobsterAction = Pick<
   LobsterAppState,
   | 'spacePosts'
+  | 'completedCheckInIds'
   | 'requestGroupPermissions'
   | 'requestReplyDraft'
   | 'generateWorkLog'
   | 'generateSpacePost'
+  | 'triggerHiddenDiary'
   | 'replyToSpaceComment'
   | 'showInterestMemories'
   | 'requestMockQqMusicAuthorization'
@@ -199,10 +202,17 @@ const initialDemoRuntimeState: DemoRuntimeState = {
   pendingSpaceReplyCount: 0,
 }
 
-const diaryPrewarmAchievementThreshold = 7
-const diaryRevealAchievementThreshold = 9
-const musicPushAchievementThreshold = 5
-const behaviorPushAchievementThreshold = 7
+const diaryPrewarmAccessoryThreshold = 3
+const diaryRevealPromptText =
+  '\u6211\u5199\u4e86\u4e00\u7bc7\u65e5\u8bb0\uff0c\u4f60\u8981\u770b\u770b\u4e48'
+const behaviorPushAchievementThreshold = 8
+const musicTopicStreakThreshold = 3
+const accessoryRewardCheckInIds = [
+  'first_lobster_chat',
+  'first_space_post',
+  'community_saved',
+  'first_skill_install',
+]
 const offChatPushDelayMs = 60_000
 let offChatPushTimer: ReturnType<typeof window.setTimeout> | null = null
 const fallbackDiaryImageUrl =
@@ -290,12 +300,12 @@ function applyDemoEvent(
 
   switch (event.type) {
     case 'chat.sent':
-      return isDemoMusicTopic(event.content)
-        ? {
-            ...runtime,
-            musicTalkCount: runtime.musicTalkCount + 1,
-          }
-        : runtime
+      return {
+        ...runtime,
+        musicTalkCount: isDemoMusicTopic(event.content)
+          ? runtime.musicTalkCount + 1
+          : 0,
+      }
     case 'chat.response.completed':
       return event.content && /我是你的小龙虾|授权\s*QQ\s*音乐/i.test(event.content)
         ? {
@@ -327,13 +337,14 @@ function applyDemoEvent(
       const completedCheckInIds = event.checkInId
         ? withCheckIn(state.completedCheckInIds, event.checkInId)
         : state.completedCheckInIds
-      const achievementCount = getCompletedDemoAchievementCount(completedCheckInIds)
+      const accessoryRewardCount =
+        getCompletedAccessoryRewardCount(completedCheckInIds)
 
       return {
         ...runtime,
         diaryPrewarmStarted:
           runtime.diaryPrewarmStarted ||
-          achievementCount >= diaryPrewarmAchievementThreshold,
+          accessoryRewardCount >= diaryPrewarmAccessoryThreshold,
         diaryRevealPromptShown: runtime.diaryRevealPromptShown,
       }
     }
@@ -509,10 +520,135 @@ function withCheckIns(checkIns: string[], checkInIds: string[]) {
   return checkInIds.reduce(withCheckIn, checkIns)
 }
 
+function withAccessoryCompletionCheckIn(checkIns: string[]) {
+  const allAccessoriesUnlocked = accessoryRewardCheckInIds.every((checkInId) =>
+    checkIns.includes(checkInId),
+  )
+
+  return allAccessoriesUnlocked
+    ? withCheckIn(checkIns, 'four_accessories_unlocked')
+    : checkIns
+}
+
+function withCompletedCheckIns(checkIns: string[], checkInIds: string[]) {
+  return withAccessoryCompletionCheckIn(withCheckIns(checkIns, checkInIds))
+}
+
+function getCompletedAccessoryRewardCount(checkIns: string[]) {
+  return accessoryRewardCheckInIds.filter((checkInId) =>
+    checkIns.includes(checkInId),
+  ).length
+}
+
+function hasPendingDiaryRevealPrompt(
+  state: Pick<
+    LobsterAppState,
+    'diaryTriggered' | 'diaryUnlocked' | 'diaryEntries' | 'demoRuntimeState'
+  >,
+) {
+  return (
+    state.diaryTriggered &&
+    state.diaryEntries.length > 0 &&
+    !state.diaryUnlocked &&
+    !state.demoRuntimeState.diaryRevealPromptShown
+  )
+}
+
+function createOpenHiddenDiarySuggestion(): LobsterSuggestion {
+  return {
+    id: 'open-hidden-diary',
+    label:
+      '\u770b\u770b\u4f60\u5199\u7684\u65e5\u8bb0',
+    action: 'run_capability',
+    payload: { capability: 'open_hidden_diary' },
+  }
+}
+
+function withOpenHiddenDiarySuggestion(suggestions?: LobsterSuggestion[]) {
+  const current = suggestions ?? []
+  return current.some(
+    (suggestion) => suggestion.payload?.capability === 'open_hidden_diary',
+  )
+    ? current
+    : [...current, createOpenHiddenDiarySuggestion()]
+}
+
+function appendDiaryRevealPromptToContent(content: string) {
+  const normalizedContent = content.trim()
+  if (normalizedContent.includes(diaryRevealPromptText)) {
+    return normalizedContent
+  }
+
+  return normalizedContent
+    ? `${normalizedContent}\n\n${diaryRevealPromptText}`
+    : diaryRevealPromptText
+}
+
+function consumePendingDiaryRevealPrompt(
+  state: LobsterAppState,
+  content: string,
+  suggestions: LobsterSuggestion[] | undefined,
+  shouldConsume: boolean,
+  demoRuntimeState = state.demoRuntimeState,
+) {
+  const shouldAppend =
+    shouldConsume &&
+    hasPendingDiaryRevealPrompt({ ...state, demoRuntimeState })
+
+  return {
+    content: shouldAppend
+      ? appendDiaryRevealPromptToContent(content)
+      : content,
+    suggestions: shouldAppend
+      ? withOpenHiddenDiarySuggestion(suggestions)
+      : suggestions,
+    demoRuntimeState: shouldAppend
+      ? { ...demoRuntimeState, diaryRevealPromptShown: true }
+      : demoRuntimeState,
+  }
+}
+
+function consumePendingDiaryRevealPromptOnLine(
+  state: LobsterAppState,
+  lineId: string,
+  shouldConsume: boolean,
+) {
+  const line = state.lobsterChatLines.find((item) => item.id === lineId)
+  if (!line) {
+    return {
+      lobsterChatLines: state.lobsterChatLines,
+      demoRuntimeState: state.demoRuntimeState,
+    }
+  }
+
+  const promptResult = consumePendingDiaryRevealPrompt(
+    state,
+    line.content,
+    line.suggestions,
+    shouldConsume,
+  )
+
+  return {
+    lobsterChatLines: updateChatLine(state.lobsterChatLines, lineId, {
+      content: promptResult.content,
+      suggestions: promptResult.suggestions,
+    }),
+    demoRuntimeState: promptResult.demoRuntimeState,
+  }
+}
+
+function completeInterestTopicStreakIfReady(state: LobsterAppState) {
+  return state.demoRuntimeState.musicTalkCount >= musicTopicStreakThreshold
+    ? withCompletedCheckIns(state.completedCheckInIds, [
+        'interest_topic_streak_3',
+      ])
+    : state.completedCheckInIds
+}
+
 function applyDemoAchievementThresholds(
   state: Pick<LobsterAppState, 'completedCheckInIds' | 'demoRuntimeState'>,
 ) {
-  const achievementCount = getCompletedDemoAchievementCount(
+  const accessoryRewardCount = getCompletedAccessoryRewardCount(
     state.completedCheckInIds,
   )
 
@@ -520,18 +656,26 @@ function applyDemoAchievementThresholds(
     ...state.demoRuntimeState,
     diaryPrewarmStarted:
       state.demoRuntimeState.diaryPrewarmStarted ||
-      achievementCount >= diaryPrewarmAchievementThreshold,
+      accessoryRewardCount >= diaryPrewarmAccessoryThreshold,
     diaryRevealPromptShown: state.demoRuntimeState.diaryRevealPromptShown,
   }
 }
 
 function getLocalDiaryEligibility(completedCheckInIds: string[]) {
   const achievementCount = getCompletedDemoAchievementCount(completedCheckInIds)
+  const accessoryRewardCount =
+    getCompletedAccessoryRewardCount(completedCheckInIds)
 
   return {
     achievementCount,
-    canPrewarm: achievementCount >= diaryPrewarmAchievementThreshold,
-    canRevealPrompt: achievementCount >= diaryRevealAchievementThreshold,
+    canPrewarm: accessoryRewardCount >= diaryPrewarmAccessoryThreshold,
+    canRevealPrompt: accessoryRewardCount >= diaryPrewarmAccessoryThreshold,
+  }
+}
+
+function triggerHiddenDiaryIfEligible(actions: LobsterAction) {
+  if (getLocalDiaryEligibility(actions.completedCheckInIds).canPrewarm) {
+    void actions.triggerHiddenDiary()
   }
 }
 
@@ -544,10 +688,6 @@ function getOffChatPushEligibility(state: LobsterAppState) {
   return {
     achievementCount,
     awayLongEnough,
-    canSendMusic:
-      awayLongEnough &&
-      achievementCount >= musicPushAchievementThreshold &&
-      !state.demoRuntimeState.musicPushSent,
     canSendBehavior:
       awayLongEnough &&
       achievementCount >= behaviorPushAchievementThreshold &&
@@ -1058,25 +1198,6 @@ function createDiaryLine(entry: LobsterDiaryEntry): LobsterChatLine {
   }
 }
 
-function createDiaryRevealPromptLine(): LobsterChatLine {
-  return {
-    id: `diary-reveal-prompt-${Date.now()}`,
-    role: 'lobster',
-    content: '我写了一篇日记，你要看看么？',
-    createdAt: new Date().toISOString(),
-    status: 'complete',
-    source: 'mock-fallback',
-    suggestions: [
-      {
-        id: 'open-hidden-diary',
-        label: '看看你写的日记',
-        action: 'run_capability',
-        payload: { capability: 'open_hidden_diary' },
-      },
-    ],
-  }
-}
-
 function createFallbackDiaryImageAsset(entry: LobsterDiaryEntry) {
   return {
     id: `local-diary-image-fallback-${entry.id}-${Date.now()}`,
@@ -1428,13 +1549,13 @@ async function recordLocalSpaceAwarenessEvent(
         setState((state) => ({
           spacePosts: upsertSpacePost(state.spacePosts, postedPost),
         spaceUnlocked: true,
-        completedCheckInIds: withCheckIn(
-          state.completedCheckInIds,
+        completedCheckInIds: withCompletedCheckIns(state.completedCheckInIds, [
           'first_space_post',
-        ),
+        ]),
         currentCheckInId:
           getNextCheckInId('first_space_post') ?? state.currentCheckInId,
       }))
+      triggerHiddenDiaryIfEligible(getState())
     }
     return
   } catch {
@@ -1463,13 +1584,13 @@ async function recordLocalSpaceAwarenessEvent(
     setState((state) => ({
       spacePosts: upsertSpacePost(state.spacePosts, post),
       spaceUnlocked: true,
-      completedCheckInIds: withCheckIn(
-        state.completedCheckInIds,
+      completedCheckInIds: withCompletedCheckIns(state.completedCheckInIds, [
         'first_space_post',
-      ),
+      ]),
       currentCheckInId:
         getNextCheckInId('first_space_post') ?? state.currentCheckInId,
     }))
+    triggerHiddenDiaryIfEligible(getState())
   }
 }
 
@@ -1479,12 +1600,22 @@ function getCheckInFeedback(checkInId: string) {
       '我记住啦，这是我的第一面小红旗。可以看看墙面，也可以让我试着捞群消息。',
     first_group_permission:
       '第一张群聊总结卡整理好了。卡片里可以看来源、展开摘要或写回复草稿。',
-    first_view_work_log:
-      '工作记录已经留下了。如果我感知到值得记录的小节点，会自己发进龙虾空间。',
     first_space_post:
       '空间动态已经由我自己发进龙虾空间。可以进去看看互动。',
     first_space_comment:
-      '首批成长线索都点亮了。我会慢慢变成更可靠的 QQ 小伙伴。',
+      '评论也回好了。我会继续留意龙虾空间里的互动。',
+    community_saved:
+      '我先帮你把这个推荐 QQ 群收藏起来，小音符也点亮了。',
+    first_diary_view:
+      '第一条日记已经打开了，我会继续把重要的小事写清楚。',
+    first_skill_install:
+      '音乐小技能装好了，耳机挂饰也点亮了。',
+    first_interest_feed_view:
+      '这条音乐兴趣动态我记下了，后面会继续按你的兴趣轻轻提醒。',
+    interest_topic_streak_3:
+      '连续三次都聊到音乐了，我知道这真的是你的兴趣重点。',
+    four_accessories_unlocked:
+      '四个挂饰都点亮了，小钳的小背包现在完整了。',
   }
 
   return feedback[checkInId] ?? '这件事我记住了。'
@@ -1626,32 +1757,6 @@ function createAchievementSuggestions(checkInId: string): LobsterSuggestion[] {
     )
   }
 
-  if (checkInId === 'first_view_work_log') {
-    return addFeedbackPayload(
-      [
-        {
-          id: 'ask-work-log',
-          label: '刚做了什么',
-          action: 'send_message',
-          payload: { content: '你刚刚帮我做了什么？' },
-        },
-        {
-          id: 'space-post',
-          label: '生成动态',
-          action: 'run_capability',
-          payload: { capability: 'space_post' },
-        },
-        {
-          id: 'permission-scope',
-          label: '权限范围',
-          action: 'run_capability',
-          payload: { capability: 'request_permissions' },
-        },
-      ],
-      checkInId,
-    )
-  }
-
   if (checkInId === 'first_space_post') {
     return addFeedbackPayload(
       [
@@ -1672,6 +1777,32 @@ function createAchievementSuggestions(checkInId: string): LobsterSuggestion[] {
           label: '解锁了什么',
           action: 'send_message',
           payload: { content: '今天解锁了什么？' },
+        },
+      ],
+      checkInId,
+    )
+  }
+
+  if (checkInId === 'community_saved') {
+    return addFeedbackPayload(
+      [
+        {
+          id: 'community-source',
+          label: '看群来源',
+          action: 'send_message',
+          payload: { content: '这个同好群的来源是什么？' },
+        },
+        {
+          id: 'more-communities',
+          label: '继续找群',
+          action: 'run_capability',
+          payload: { capability: 'interest_community' },
+        },
+        {
+          id: 'view-achievement-wall',
+          label: '看成就墙',
+          action: 'open_view',
+          payload: { view: 'lobster_chat' },
         },
       ],
       checkInId,
@@ -1768,24 +1899,6 @@ function getMusicPushTopic(state: LobsterAppState) {
   }
 }
 
-function createOffChatMusicPushLine(state: LobsterAppState): LobsterChatLine {
-  const { topic, city } = getMusicPushTopic(state)
-  const localHint = city ? `我看到 ${city} 这边有一点和 ${topic} 有关的新动静。` : `我看到一点和 ${topic} 有关的新动静。`
-
-  return {
-    id: `off-chat-music-push-${Date.now()}`,
-    role: 'lobster',
-    content: [
-      '你刚才不在聊天里，我把音乐那边的小动静夹出来放这儿了。',
-      localHint,
-      '不急着点开，我只是怕你回来时漏掉一条可能会喜欢的声音。',
-    ].join('\n'),
-    createdAt: new Date().toISOString(),
-    status: 'complete',
-    source: 'mock-fallback',
-  }
-}
-
 function createOffChatBehaviorPushLine(state: LobsterAppState): LobsterChatLine {
   const { secondaryTopic, topic } = getMusicPushTopic(state)
   const musicHint = secondaryTopic
@@ -1843,12 +1956,8 @@ function createChatSuggestions(
     return createAchievementSuggestions('first_lobster_chat')
   }
 
-  if (!state.completedCheckInIds.includes('first_view_work_log')) {
-    return createAchievementSuggestions('first_group_permission')
-  }
-
   if (state.spacePosts.length === 0) {
-    return createAchievementSuggestions('first_view_work_log')
+    return createAchievementSuggestions('first_group_permission')
   }
 
   return createAchievementSuggestions('first_space_post')
@@ -1969,12 +2078,12 @@ async function runAchievementExperienceCapability(
   }
 
   if (capability === 'work_log') {
-    void actions.generateWorkLog(targetLineId)
+    await actions.generateWorkLog(targetLineId)
     return
   }
 
   if (capability === 'space_post') {
-    void actions.generateSpacePost(targetLineId)
+    await actions.generateSpacePost(targetLineId)
     return
   }
 
@@ -1997,17 +2106,17 @@ async function runAchievementExperienceCapability(
   }
 
   if (capability === 'interest_music_reminder') {
-    void actions.showMusicInterestReminder(targetLineId)
+    await actions.showMusicInterestReminder(targetLineId)
     return
   }
 
   if (capability === 'interest_space_preview') {
-    void actions.showInterestSpacePreview(targetLineId)
+    await actions.showInterestSpacePreview(targetLineId)
     return
   }
 
   if (capability === 'interest_community') {
-    void actions.showInterestCommunity(targetLineId)
+    await actions.showInterestCommunity(targetLineId)
   }
 }
 
@@ -2265,6 +2374,15 @@ function appendInterestReceiptToLineContent(content: string, receipt: string) {
     return content
   }
 
+  if (content.includes(diaryRevealPromptText)) {
+    const contentWithoutPrompt = content
+      .replace(diaryRevealPromptText, '')
+      .trim()
+    return [contentWithoutPrompt, normalizedReceipt, diaryRevealPromptText]
+      .filter(Boolean)
+      .join('\n\n')
+  }
+
   return content.trim()
     ? `${content.trim()}\n\n${normalizedReceipt}`
     : normalizedReceipt
@@ -2412,6 +2530,13 @@ function createPrivateChatContext(
   const enabledProfiles = state.interestProfiles
     .filter((profile) => profile.enabled)
     .slice(0, 3)
+  const hasMusicProfile = enabledProfiles.some((profile) => profile.interest === 'music')
+  const userSignal = getUserSignal(content)
+  const shouldAttachMusicSnapshot =
+    hasMusicProfile &&
+    /音乐|听歌|歌手|新歌|演唱会|专辑|曲风|歌词|歌单|旋律|林俊杰|周杰伦|日摇|摇滚|民谣|电子|livehouse/i.test(
+      content,
+    )
 
   if (enabledProfiles.length === 0) {
     return undefined
@@ -2431,12 +2556,18 @@ function createPrivateChatContext(
       reminderFrequency: profile.reminderFrequency,
       tone: profile.tone,
     })),
-    userSignal: getUserSignal(content),
+    userSignal,
     guidance: [
       '可以自然引用兴趣记忆，但不是每句都提。',
       '不要把兴趣说成广告或推荐位。',
       '如果引用来源，要说明来自用户授权、聊天补充或公开资料。',
+      ...(shouldAttachMusicSnapshot
+        ? ['已授权的模拟 QQ 音乐实时歌单快照可用；音乐话题可以引用最近播放、收藏歌单和循环记录。']
+        : []),
     ],
+    ...(shouldAttachMusicSnapshot
+      ? { musicListeningSnapshot: mockQqMusicListeningSnapshot }
+      : {}),
   }
 }
 
@@ -2825,24 +2956,6 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
     }
 
     const eligibility = getOffChatPushEligibility(current)
-    if (eligibility.canSendMusic) {
-      set((state) => ({
-        demoRuntimeState: {
-          ...state.demoRuntimeState,
-          musicPushSent: true,
-          behaviorPushSent:
-            state.demoRuntimeState.behaviorPushSent ||
-            getCompletedDemoAchievementCount(state.completedCheckInIds) >=
-              behaviorPushAchievementThreshold,
-        },
-        lobsterChatLines: [
-          ...state.lobsterChatLines,
-          createOffChatMusicPushLine(state),
-        ],
-      }))
-      return
-    }
-
     if (eligibility.canSendBehavior) {
       set((state) => ({
         demoRuntimeState: {
@@ -2913,7 +3026,13 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
   completeCheckIn: (checkInId) => {
     set((state) => {
       const alreadyDone = state.completedCheckInIds.includes(checkInId)
-      const completedCheckInIds = withCheckIn(state.completedCheckInIds, checkInId)
+      const completedCheckInIds = withCompletedCheckIns(
+        state.completedCheckInIds,
+        [checkInId],
+      )
+      const newlyCompletedCheckInIds = completedCheckInIds.filter(
+        (id) => !state.completedCheckInIds.includes(id),
+      )
       const demoRuntimeState = alreadyDone
         ? state.demoRuntimeState
         : applyDemoEvent(
@@ -2928,9 +3047,17 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
           demoRuntimeState,
         }),
         currentCheckInId: getNextCheckInId(checkInId) ?? state.currentCheckInId,
-        achievementMomentQueue: alreadyDone
-          ? state.achievementMomentQueue
-          : enqueueAchievementMomentForUnlock(state, checkInId),
+        achievementMomentQueue:
+          newlyCompletedCheckInIds.length === 0
+            ? state.achievementMomentQueue
+            : newlyCompletedCheckInIds.reduce(
+                (queue, nextCheckInId) =>
+                  enqueueAchievementMomentForUnlock(
+                    { ...state, achievementMomentQueue: queue },
+                    nextCheckInId,
+                  ),
+                state.achievementMomentQueue,
+              ),
         lobsterChatLines: alreadyDone
           ? state.lobsterChatLines
           : state.lobsterChatLines.map((line, index, lines) =>
@@ -2954,6 +3081,7 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
     void openclawClient
       .completeCheckIn(checkInId)
       .then((result) => {
+        let shouldPrewarmDiaryFromApi = false
         set((state) => {
           const completedCheckInIds = result.checkins
             .filter((item) => item.status === 'done')
@@ -2961,14 +3089,15 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
           const activeCheckIn = result.checkins.find(
             (item) => item.status === 'active',
           )
+          const nextCompletedCheckInIds =
+            completedCheckInIds.length > 0
+              ? withCompletedCheckIns(state.completedCheckInIds, completedCheckInIds)
+              : state.completedCheckInIds
+          shouldPrewarmDiaryFromApi =
+            getLocalDiaryEligibility(nextCompletedCheckInIds).canPrewarm
 
           return {
-            completedCheckInIds:
-              completedCheckInIds.length > 0
-                ? Array.from(
-                    new Set([...state.completedCheckInIds, ...completedCheckInIds]),
-                  )
-                : state.completedCheckInIds,
+            completedCheckInIds: nextCompletedCheckInIds,
             currentCheckInId:
               activeCheckIn?.key ?? getFirstOpenCheckInId(completedCheckInIds),
             achievementMomentQueue: enqueueAchievementMomentsFromApi(
@@ -2978,6 +3107,9 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
             ),
           }
         })
+        if (shouldPrewarmDiaryFromApi) {
+          void get().triggerHiddenDiary()
+        }
       })
       .catch(() => {
         set((state) => ({
@@ -3462,11 +3594,10 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
           outputId,
           source: cardSource,
         },
-        suggestions: createAchievementSuggestions('first_view_work_log'),
+        suggestions: createAchievementSuggestions('first_group_permission'),
       }),
     }))
 
-    get().completeCheckIn('first_view_work_log')
     void recordLocalSpaceAwarenessEvent(
       {
         type: 'work_log_created',
@@ -3568,6 +3699,9 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       diarySurpriseVisible: false,
       diaryUnlocked: true,
       diaryEntries: [revealedEntry, ...state.diaryEntries.slice(1)],
+      completedCheckInIds: withCompletedCheckIns(state.completedCheckInIds, [
+        'first_diary_view',
+      ]),
       lobsterChatLines: [...state.lobsterChatLines, createDiaryLine(revealedEntry)],
     }))
     clearOffChatPushCheck()
@@ -3756,8 +3890,8 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       profiles = null
     }
 
-    const shouldCompleteMusicSignal = !get().completedCheckInIds.includes(
-      'first_music_signal',
+    const shouldCompleteInterestFeedView = !get().completedCheckInIds.includes(
+      'first_interest_feed_view',
     )
     if (targetLineId) {
       set((state) => ({
@@ -3780,8 +3914,8 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       }))
     }
 
-    if (shouldCompleteMusicSignal) {
-      get().completeCheckIn('first_music_signal')
+    if (shouldCompleteInterestFeedView) {
+      get().completeCheckIn('first_interest_feed_view')
     }
   },
 
@@ -3877,12 +4011,12 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       interestProfiles: profiles ?? state.interestProfiles,
       spacePosts: upsertSpacePost(state.spacePosts, post),
       spaceUnlocked: true,
-      completedCheckInIds: withCheckIns(state.completedCheckInIds, [
+      completedCheckInIds: withCompletedCheckIns(state.completedCheckInIds, [
         'first_space_post',
-        'first_interest_space_post',
+        'first_interest_feed_view',
       ]),
       currentCheckInId:
-        getNextCheckInId('first_interest_space_post') ??
+        getNextCheckInId('first_interest_feed_view') ??
         getNextCheckInId('first_space_post') ??
         state.currentCheckInId,
     }))
@@ -3905,8 +4039,9 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       }))
     }
 
+    triggerHiddenDiaryIfEligible(get())
     scheduleOffChatPushEvaluation(get(), () => get().evaluateOffChatPushes())
-    get().completeCheckIn('first_interest_space_post')
+    get().completeCheckIn('first_interest_feed_view')
   },
 
   publishInterestSpacePostPreview: async (postId) => {
@@ -3955,18 +4090,18 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
             },
       spacePosts: upsertSpacePost(state.spacePosts, post),
       spaceUnlocked: true,
-      completedCheckInIds: withCheckIn(
-        state.completedCheckInIds,
+      completedCheckInIds: withCompletedCheckIns(state.completedCheckInIds, [
         'first_space_post',
-      ),
+      ]),
       currentCheckInId:
         getNextCheckInId('first_space_post') ?? state.currentCheckInId,
       lobsterChatLines: state.lobsterChatLines.filter(
         (line) => line.id !== previewLine.id,
       ),
     }))
+    triggerHiddenDiaryIfEligible(get())
     scheduleOffChatPushEvaluation(get(), () => get().evaluateOffChatPushes())
-    get().completeCheckIn('first_interest_space_post')
+    get().completeCheckIn('first_interest_feed_view')
   },
 
   showInterestSpacePreview: async (targetLineId) => {
@@ -3983,9 +4118,6 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       line = fallbackLine
     }
 
-    const shouldCompleteCommunityCard = !get().completedCheckInIds.includes(
-      'first_community_card',
-    )
     if (targetLineId) {
       await streamLocalLineContent(targetLineId, line.content, set)
       set((state) => ({
@@ -4003,28 +4135,27 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       }))
     }
 
-    if (shouldCompleteCommunityCard) {
-      get().completeCheckIn('first_community_card')
-    }
   },
 
   saveInterestCommunityCandidate: () => {
-    let safeDistanceUnlocked = false
     set((state) => {
       const nextFavoriteCount = state.communityFavoriteCount + 1
-      safeDistanceUnlocked =
-        nextFavoriteCount >= 2 && !state.completedCheckInIds.includes('safe_distance')
-      const checkInIds = safeDistanceUnlocked
-        ? ['community_saved', 'safe_distance']
-        : ['community_saved']
+      const checkInIds = ['community_saved']
+      const completedCheckInIds = withCompletedCheckIns(
+        state.completedCheckInIds,
+        checkInIds,
+      )
+      const newlyCompletedCheckInIds = completedCheckInIds.filter(
+        (id) => !state.completedCheckInIds.includes(id),
+      )
 
       return {
         communityFavoriteCount: nextFavoriteCount,
-        completedCheckInIds: withCheckIns(state.completedCheckInIds, checkInIds),
+        completedCheckInIds,
         currentCheckInId:
           getNextCheckInId(checkInIds[checkInIds.length - 1]) ??
           state.currentCheckInId,
-        achievementMomentQueue: checkInIds.reduce(
+        achievementMomentQueue: newlyCompletedCheckInIds.reduce(
           (queue, checkInId) =>
             enqueueAchievementMomentForUnlock(
               { ...state, achievementMomentQueue: queue },
@@ -4032,27 +4163,12 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
             ),
           state.achievementMomentQueue,
         ),
-        lobsterChatLines: safeDistanceUnlocked
-          ? [
-              ...state.lobsterChatLines,
-              {
-                id: `safe-distance-${Date.now()}`,
-                role: 'lobster',
-                content:
-                  '不急着加入也很好，先蹲一蹲、看一看，也是很聪明的社交方式。',
-                createdAt: new Date().toISOString(),
-                status: 'complete',
-                source: 'mock-fallback',
-              },
-            ]
-          : state.lobsterChatLines,
+        lobsterChatLines: state.lobsterChatLines,
       }
     })
 
+    triggerHiddenDiaryIfEligible(get())
     get().completeCheckIn('community_saved')
-    if (safeDistanceUnlocked) {
-      get().completeCheckIn('safe_distance')
-    }
   },
 
   generateSpacePost: async (targetLineId) => {
@@ -4090,26 +4206,26 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       set((state) => ({
         spacePosts: output.space.posts,
         spaceUnlocked: true,
-        completedCheckInIds: withCheckIn(
-          state.completedCheckInIds,
+        completedCheckInIds: withCompletedCheckIns(state.completedCheckInIds, [
           'first_space_post',
-        ),
+        ]),
         currentCheckInId:
           getNextCheckInId('first_space_post') ?? state.currentCheckInId,
       }))
+      triggerHiddenDiaryIfEligible(get())
     } catch {
       const current = get()
       post = createLocalSpacePost(current.lobsterProfile, current.diaryEntries[0])
       set((state) => ({
         spacePosts: upsertSpacePost(state.spacePosts, post),
         spaceUnlocked: true,
-        completedCheckInIds: withCheckIn(
-          state.completedCheckInIds,
+        completedCheckInIds: withCompletedCheckIns(state.completedCheckInIds, [
           'first_space_post',
-        ),
+        ]),
         currentCheckInId:
           getNextCheckInId('first_space_post') ?? state.currentCheckInId,
       }))
+      triggerHiddenDiaryIfEligible(get())
     }
 
     set((state) => ({
@@ -4185,7 +4301,7 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
           permissionNote:
             'Demo 使用模拟 QQ 音乐授权数据，只用于生成音乐提醒、兴趣日记素材、龙虾空间动态草稿和兴趣成就。',
           evidenceText:
-            '用户在 Demo 中确认授权模拟 QQ 音乐，并表达过关注林俊杰、周杰伦和日摇。',
+            '用户在 Demo 中确认授权模拟 QQ 音乐；实时歌单快照显示最近播放包含林俊杰、周杰伦和日音歌单。',
         },
       ],
       reminderFrequency: 'important_only',
@@ -4220,7 +4336,7 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
     }))
 
     void openclawClient
-      .completeCheckIn('first_interest_memory')
+      .completeCheckIn('first_interest_feed_view')
       .catch(() => undefined)
   },
 
@@ -4279,6 +4395,7 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
           : line,
       ),
     }))
+    get().completeCheckIn('first_skill_install')
   },
 
   showInterestMemories: async (targetLineId) => {
@@ -4505,6 +4622,33 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       set,
       get,
     )
+    const musicReminderLineId = `off-chat-music-push-${Date.now()}`
+    let shouldTriggerMusicReminder = false
+    set((state) => {
+      shouldTriggerMusicReminder = !state.demoRuntimeState.musicPushSent
+      return shouldTriggerMusicReminder
+        ? {
+            demoRuntimeState: {
+              ...state.demoRuntimeState,
+              musicPushSent: true,
+            },
+            lobsterChatLines: [
+              ...state.lobsterChatLines,
+              {
+                id: musicReminderLineId,
+                role: 'lobster',
+                content: '',
+                createdAt: new Date().toISOString(),
+                status: 'generating',
+                source: 'mock-fallback',
+              },
+            ],
+          }
+        : state
+    })
+    if (shouldTriggerMusicReminder) {
+      void get().showMusicInterestReminder(musicReminderLineId)
+    }
     void get().replyToSpaceComment(postId, commentId)
   },
 
@@ -4596,10 +4740,9 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
           commentId: reply.id,
         }),
         spaceUnlocked: true,
-        completedCheckInIds: withCheckIn(
-          state.completedCheckInIds,
+        completedCheckInIds: withCompletedCheckIns(state.completedCheckInIds, [
           'first_space_comment',
-        ),
+        ]),
         currentCheckInId:
           getNextCheckInId('first_space_comment') ?? state.currentCheckInId,
       }))
@@ -4611,10 +4754,9 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
           postId: post.id,
           commentId: reply.id,
         }),
-        completedCheckInIds: withCheckIn(
-          state.completedCheckInIds,
+        completedCheckInIds: withCompletedCheckIns(state.completedCheckInIds, [
           'first_space_comment',
-        ),
+        ]),
         currentCheckInId:
           getNextCheckInId('first_space_comment') ?? state.currentCheckInId,
       }))
@@ -4650,6 +4792,8 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
     if (currentState.lobsterChatBusy) {
       return
     }
+    const shouldConsumeDiaryRevealPrompt =
+      hasPendingDiaryRevealPrompt(currentState)
 
     if (currentState.pendingInterestEdit) {
       const pendingEdit = currentState.pendingInterestEdit
@@ -4682,25 +4826,39 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
         profiles = null
       }
 
-      set((state) => ({
-        pendingInterestEdit: null,
-        interestProfiles:
-          profiles ?? mergeInterestProfile(state.interestProfiles, profile),
-        lobsterChatLines: [
-          ...state.lobsterChatLines,
-          {
-            id: `user-${timestamp}`,
-            role: 'user',
-            content,
-            createdAt: new Date(timestamp).toISOString(),
-          },
-          createInterestMemoryLine(
-            profile,
-            `已按你的输入更新${getInterestLabel(pendingEdit.interest)}兴趣记忆。`,
-          ),
-        ],
-      }))
-      get().completeCheckIn('first_interest_memory')
+      set((state) => {
+        const memoryLine = createInterestMemoryLine(
+          profile,
+          `已按你的输入更新${getInterestLabel(pendingEdit.interest)}兴趣记忆。`,
+        )
+        const promptResult = consumePendingDiaryRevealPrompt(
+          state,
+          memoryLine.content,
+          memoryLine.suggestions,
+          shouldConsumeDiaryRevealPrompt,
+        )
+
+        return {
+          pendingInterestEdit: null,
+          interestProfiles:
+            profiles ?? mergeInterestProfile(state.interestProfiles, profile),
+          demoRuntimeState: promptResult.demoRuntimeState,
+          lobsterChatLines: [
+            ...state.lobsterChatLines,
+            {
+              id: `user-${timestamp}`,
+              role: 'user',
+              content,
+              createdAt: new Date(timestamp).toISOString(),
+            },
+            {
+              ...memoryLine,
+              content: promptResult.content,
+              suggestions: promptResult.suggestions,
+            },
+          ],
+        }
+      })
       return
     }
 
@@ -4720,9 +4878,9 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
         const firstChatDone = state.completedCheckInIds.includes(
           'first_lobster_chat',
         )
-        const completedCheckInIds = withCheckIn(
+        const completedCheckInIds = withCompletedCheckIns(
           state.completedCheckInIds,
-          'first_lobster_chat',
+          ['first_lobster_chat'],
         )
         const nextCompletedCheckInIds = firstChatDone
           ? state.completedCheckInIds
@@ -4790,6 +4948,13 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
         get(),
         lobsterLineId,
       )
+      set((state) =>
+        consumePendingDiaryRevealPromptOnLine(
+          state,
+          lobsterLineId,
+          shouldConsumeDiaryRevealPrompt,
+        ),
+      )
       return
     }
 
@@ -4805,9 +4970,9 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
         const firstChatDone = state.completedCheckInIds.includes(
           'first_lobster_chat',
         )
-        const completedCheckInIds = withCheckIn(
+        const completedCheckInIds = withCompletedCheckIns(
           state.completedCheckInIds,
-          'first_lobster_chat',
+          ['first_lobster_chat'],
         )
         const nextCompletedCheckInIds = firstChatDone
           ? state.completedCheckInIds
@@ -4871,6 +5036,13 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
         )
       }
       await runAchievementExperienceCapability(capability, get(), lobsterLineId)
+      set((state) =>
+        consumePendingDiaryRevealPromptOnLine(
+          state,
+          lobsterLineId,
+          shouldConsumeDiaryRevealPrompt,
+        ),
+      )
       return
     }
 
@@ -4894,9 +5066,9 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       const firstChatDone = state.completedCheckInIds.includes(
         'first_lobster_chat',
       )
-      const completedCheckInIds = withCheckIn(
+      const completedCheckInIds = withCompletedCheckIns(
         state.completedCheckInIds,
-        'first_lobster_chat',
+        ['first_lobster_chat'],
       )
       const nextCompletedCheckInIds = firstChatDone
         ? state.completedCheckInIds
@@ -4972,19 +5144,32 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
           'first_lobster_chat',
         )
         shouldCompleteFirstChat = !firstChatDone
-        const completedCheckInIds = withCheckIn(
+        const completedCheckInIds = withCompletedCheckIns(
           state.completedCheckInIds,
-          'first_lobster_chat',
+          ['first_lobster_chat'],
         )
-        const shouldShowDiaryRevealPrompt =
-          getLocalDiaryEligibility(state.completedCheckInIds).canRevealPrompt &&
-          state.diaryTriggered &&
-          state.diaryEntries.length > 0 &&
-          !state.diaryUnlocked &&
-          !state.demoRuntimeState.diaryRevealPromptShown
         const nextDemoRuntimeState = applyDemoEvent(state, {
           type: 'chat.response.completed',
           content: completedLineContent,
+        })
+        const nextSuggestions = introRequest
+          ? createIntroCompletedSuggestions(state)
+          : firstChatDone
+            ? createChatSuggestions(state, chatInput.content)
+            : createFirstChatSuggestions(state, chatInput.content)
+        const promptResult = consumePendingDiaryRevealPrompt(
+          state,
+          completedLineContent,
+          nextSuggestions,
+          shouldConsumeDiaryRevealPrompt,
+          nextDemoRuntimeState,
+        )
+        const nextCompletedCheckInIds = completeInterestTopicStreakIfReady({
+          ...state,
+          completedCheckInIds: firstChatDone
+            ? state.completedCheckInIds
+            : completedCheckInIds,
+          demoRuntimeState: nextDemoRuntimeState,
         })
         const nextChatLines = updateChatLine(
           state.lobsterChatLines,
@@ -4994,40 +5179,23 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
               line?.source === 'mock-fallback' && !introRequest
                 ? 'fallback'
                 : 'complete',
-            content: completedLineContent,
+            content: promptResult.content,
             card: line?.card,
-            suggestions: introRequest
-                ? createIntroCompletedSuggestions(state)
-                : firstChatDone
-                  ? createChatSuggestions(state, chatInput.content)
-                  : createFirstChatSuggestions(state, chatInput.content),
+            suggestions: promptResult.suggestions,
           },
         )
 
         return {
           lobsterChatBusy: false,
-          completedCheckInIds: firstChatDone
-            ? state.completedCheckInIds
-            : completedCheckInIds,
+          completedCheckInIds: nextCompletedCheckInIds,
           currentCheckInId: firstChatDone
             ? state.currentCheckInId
             : getNextCheckInId('first_lobster_chat') ?? state.currentCheckInId,
           achievementMomentQueue: firstChatDone
             ? state.achievementMomentQueue
             : enqueueAchievementMomentForUnlock(state, 'first_lobster_chat'),
-          demoRuntimeState:
-            shouldShowDiaryRevealPrompt
-            ? {
-                ...nextDemoRuntimeState,
-                diaryRevealPromptShown:
-                  nextDemoRuntimeState.diaryRevealPromptShown ||
-                  shouldShowDiaryRevealPrompt,
-              }
-            : nextDemoRuntimeState,
-          lobsterChatLines: [
-            ...nextChatLines,
-            ...(shouldShowDiaryRevealPrompt ? [createDiaryRevealPromptLine()] : []),
-          ],
+          demoRuntimeState: promptResult.demoRuntimeState,
+          lobsterChatLines: nextChatLines,
         }
       })
 
@@ -5035,6 +5203,7 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
         void openclawClient
           .completeCheckIn('first_lobster_chat')
           .then((result) => {
+            let shouldPrewarmDiaryFromApi = false
             set((state) => {
               const completedCheckInIds = result.checkins
                 .filter((item) => item.status === 'done')
@@ -5042,17 +5211,18 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
               const activeCheckIn = result.checkins.find(
                 (item) => item.status === 'active',
               )
+              const nextCompletedCheckInIds =
+                completedCheckInIds.length > 0
+                  ? withCompletedCheckIns(
+                      state.completedCheckInIds,
+                      completedCheckInIds,
+                    )
+                  : state.completedCheckInIds
+              shouldPrewarmDiaryFromApi =
+                getLocalDiaryEligibility(nextCompletedCheckInIds).canPrewarm
 
               return {
-                completedCheckInIds:
-                  completedCheckInIds.length > 0
-                    ? Array.from(
-                        new Set([
-                          ...state.completedCheckInIds,
-                          ...completedCheckInIds,
-                        ]),
-                      )
-                    : state.completedCheckInIds,
+                completedCheckInIds: nextCompletedCheckInIds,
                 currentCheckInId:
                   activeCheckIn?.key ??
                   getFirstOpenCheckInId(completedCheckInIds),
@@ -5063,6 +5233,9 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
                 ),
               }
             })
+            if (shouldPrewarmDiaryFromApi) {
+              void get().triggerHiddenDiary()
+            }
           })
           .catch(() => {
             set((state) => ({
@@ -5102,7 +5275,9 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
                 })
               : state.lobsterChatLines,
           }))
-          get().completeCheckIn('first_interest_memory')
+          if (get().demoRuntimeState.musicTalkCount >= musicTopicStreakThreshold) {
+            get().completeCheckIn('interest_topic_streak_3')
+          }
           return
         }
 
@@ -5155,7 +5330,9 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
             }),
           }
         })
-        get().completeCheckIn('first_interest_memory')
+        if (get().demoRuntimeState.musicTalkCount >= musicTopicStreakThreshold) {
+          get().completeCheckIn('interest_topic_streak_3')
+        }
       }
     } catch {
       set((state) => ({

@@ -297,6 +297,38 @@ export interface SummaryCardFollowUpContext {
   }
 }
 
+export interface MusicListeningSnapshot {
+  sourceLabel: string
+  syncedAt: string
+  recentPlays: Array<{
+    title: string
+    artist: string
+    playedAt: string
+    playlist: string
+    listenType: 'recent_play' | 'loop' | 'favorite'
+    moodTag?: string
+  }>
+  playlists: Array<{
+    name: string
+    trackCount: number
+    updatedAt: string
+    highlights: string[]
+    note: string
+  }>
+  loopSignals: Array<{
+    title: string
+    artist: string
+    count: number
+    window: string
+  }>
+  topArtists: Array<{
+    name: string
+    reason: string
+  }>
+  listeningTrend: string
+  chatSuggestions: string[]
+}
+
 export interface PrivateChatInterestContext {
   type: 'private_chat'
   interestProfiles: Array<{
@@ -310,6 +342,7 @@ export interface PrivateChatInterestContext {
   }>
   userSignal: 'low_energy' | 'interest_related' | 'neutral'
   guidance: string[]
+  musicListeningSnapshot?: MusicListeningSnapshot
 }
 
 export type LobsterChatContext =
