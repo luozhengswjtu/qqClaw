@@ -52,6 +52,60 @@ export interface InterestProfile {
   updatedAt: string
 }
 
+export interface DemoRuntimeState {
+  introCompleted: boolean
+  introPromptShown: boolean
+  qqMusicAuthorizationPromptShown: boolean
+  qqMusicAuthorizationLoading: boolean
+  musicSkillCardShown: boolean
+  musicSkillsInstalling: boolean
+  musicSkillsInstalled: boolean
+  musicTalkCount: number
+  communityRecommendationShown: boolean
+  diaryPrewarmStarted: boolean
+  diaryRevealPromptShown: boolean
+  musicPushSent: boolean
+  behaviorPushSent: boolean
+  leftChatAt: string | null
+  pendingSpaceReplyCount: number
+}
+
+export type DemoEvent =
+  | {
+      type: 'chat.sent'
+      content: string
+    }
+  | {
+      type: 'chat.response.completed'
+      content?: string
+    }
+  | {
+      type: 'music.authorization.started'
+    }
+  | {
+      type: 'music.authorization.completed'
+    }
+  | {
+      type: 'music.skill.installed'
+    }
+  | {
+      type: 'achievement.unlocked'
+      achievementKey?: string
+      checkInId?: string
+    }
+  | {
+      type: 'view.left_lobster_chat'
+      leftAt?: string
+    }
+  | {
+      type: 'view.entered_lobster_chat'
+    }
+  | {
+      type: 'space.comment.created'
+      postId: string
+      commentId: string
+    }
+
 export type CheckInStatus = 'locked' | 'active' | 'done'
 
 export type CardType =
@@ -79,6 +133,7 @@ export interface GroupPermissionScope {
   summarizeGroup: boolean
   draftReply: boolean
   diaryMaterial?: boolean
+  summaryScheduleTime?: string
   updatedAt?: string
 }
 
@@ -261,7 +316,11 @@ export type LobsterChatContext =
   | SummaryCardFollowUpContext
   | PrivateChatInterestContext
 
-export type MusicAuthorizationStatus = 'pending' | 'authorized' | 'declined'
+export type MusicAuthorizationStatus =
+  | 'pending'
+  | 'loading'
+  | 'authorized'
+  | 'declined'
 
 export type InterestCardAction =
   | {
@@ -361,6 +420,15 @@ export type LobsterChatCard =
   | {
       type: 'music_authorization_card'
       status: MusicAuthorizationStatus
+    }
+  | {
+      type: 'music_skill_suggestion_card'
+      title: string
+      summary: string
+      skills: string[]
+      status?: 'idle' | 'installing' | 'installed'
+      steps?: string[]
+      successMessage?: string
     }
   | {
       type: 'interest_memory_card'

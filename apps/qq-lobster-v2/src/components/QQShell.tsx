@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bell,
   FileText,
@@ -91,6 +91,9 @@ function ChatMessage({
 
 export function QQShell() {
   const [firstHint, setFirstHint] = useState('')
+  const [draft, setDraft] = useState('')
+  const [localMessages, setLocalMessages] = useState<QQMessage[]>([])
+  const messageEndRef = useRef<HTMLDivElement | null>(null)
   const activeConversationId = useLobsterStore(
     (state) => state.activeConversationId,
   )
@@ -103,18 +106,67 @@ export function QQShell() {
   const openAdoption = useLobsterStore((state) => state.openAdoption)
   const openLobsterChat = useLobsterStore((state) => state.openLobsterChat)
   const sourceFocus = useLobsterStore((state) => state.sourceFocus)
+  const demoRuntimeState = useLobsterStore((state) => state.demoRuntimeState)
+  const lobsterChatLines = useLobsterStore((state) => state.lobsterChatLines)
 
   const activeConversation =
     conversations.find((item) => item.id === activeConversationId) ??
     conversations[0]
+  const leftChatAtMs = demoRuntimeState.leftChatAt
+    ? Date.parse(demoRuntimeState.leftChatAt)
+    : Number.NaN
+  const unreadPushCount = Number.isFinite(leftChatAtMs)
+    ? lobsterChatLines.filter(
+        (line) =>
+          (line.id.startsWith('off-chat-music-push-') ||
+            line.id.startsWith('off-chat-behavior-push-')) &&
+          Date.parse(line.createdAt) > leftChatAtMs,
+      ).length
+    : 0
+  const lobsterUnreadCount =
+    demoRuntimeState.leftChatAt &&
+    (unreadPushCount > 0 || demoRuntimeState.pendingSpaceReplyCount > 0)
+      ? Math.max(demoRuntimeState.pendingSpaceReplyCount, unreadPushCount)
+      : 0
 
   const activeMessages = useMemo(
     () =>
-      messages.filter(
+      [...messages, ...localMessages].filter(
         (message) => message.conversationId === activeConversation.id,
       ),
-    [activeConversation.id],
+    [activeConversation.id, localMessages],
   )
+
+  const draftContent = draft.trim()
+
+  function sendMessage() {
+    if (!draftContent) {
+      return
+    }
+
+    const now = new Date()
+    const sentAt = `${String(now.getHours()).padStart(2, '0')}:${String(
+      now.getMinutes(),
+    ).padStart(2, '0')}`
+    const message: QQMessage = {
+      id: `local-${activeConversation.id}-${now.getTime()}`,
+      conversationId: activeConversation.id,
+      senderId: currentUser.id,
+      senderName: currentUser.name,
+      senderAvatar: currentUser.avatar,
+      content: draftContent,
+      sentAt,
+      kind: 'text',
+      isOwn: true,
+    }
+
+    setLocalMessages((current) => [...current, message])
+    setDraft('')
+  }
+
+  useEffect(() => {
+    messageEndRef.current?.scrollIntoView({ block: 'end' })
+  }, [activeMessages.length])
 
   useEffect(() => {
     if (lobsterDiscovered || lobsterAdopted) {
@@ -228,16 +280,27 @@ export function QQShell() {
                 type="button"
                 onClick={openLobsterChat}
               >
-                <LobsterAvatar size="sm" mood="happy" />
+                <span className="relative">
+                  <LobsterAvatar size="sm" mood="happy" />
+                  {lobsterUnreadCount > 0 ? (
+                    <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-red-500 ring-2 ring-lobster-50" />
+                  ) : null}
+                </span>
                 <span className="min-w-0">
                   <span className="block truncate text-sm font-semibold text-ink-900">
                     小钳
                   </span>
                   <span className="mt-1 block truncate text-xs text-ink-500">
-                    回到小龙虾
+                    {lobsterUnreadCount > 0 ? '有新的小提醒' : '回到小龙虾'}
                   </span>
                 </span>
-                <span className="text-xs text-lobster-600">返回</span>
+                {lobsterUnreadCount > 0 ? (
+                  <span className="grid h-5 min-w-5 place-items-center rounded-full bg-lobster-500 px-1 text-[10px] font-semibold text-white">
+                    {lobsterUnreadCount}
+                  </span>
+                ) : (
+                  <span className="text-xs text-lobster-600">返回</span>
+                )}
               </button>
             ) : null}
             {conversations.map((conversation) => {
@@ -338,6 +401,7 @@ export function QQShell() {
                 />
               </div>
             ))}
+            <div ref={messageEndRef} />
 
           </div>
 
@@ -348,12 +412,12 @@ export function QQShell() {
               onClick={openAdoption}
             >
               <LobsterAvatar size="md" mood="curious" animated />
-              <span>
+              <span className="self-center">
                 <span className="block text-sm font-semibold text-ink-900">
-                  有个小东西从消息里探出来了
+                  Hello！Hello！
                 </span>
-                <span className="mt-1 block text-sm leading-6 text-ink-500">
-                  {firstHint}
+                <span className="mt-1 block text-sm font-semibold text-ink-900">
+                  有个小东西从消息里探出来了
                 </span>
               </span>
             </button>
@@ -365,13 +429,18 @@ export function QQShell() {
               type="button"
               onClick={openLobsterChat}
             >
-              <LobsterAvatar size="sm" mood="happy" animated />
+              <span className="relative">
+                <LobsterAvatar size="sm" mood="happy" animated />
+                {lobsterUnreadCount > 0 ? (
+                  <span className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-red-500 ring-2 ring-white" />
+                ) : null}
+              </span>
               <span>
                 <span className="block text-sm font-semibold text-ink-900">
-                  回到小钳
+                  {lobsterUnreadCount > 0 ? '小钳有新提醒' : '回到小钳'}
                 </span>
                 <span className="mt-1 block text-xs leading-5 text-ink-500">
-                  来源看完后回到成长墙
+                  {lobsterUnreadCount > 0 ? '回聊天里看看' : '来源看完后回到成长墙'}
                 </span>
               </span>
             </button>
@@ -405,11 +474,25 @@ export function QQShell() {
               <textarea
                 className="h-20 min-h-20 flex-1 resize-none rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition placeholder:text-ink-500 focus:border-qq-500 focus:bg-white focus:ring-4 focus:ring-qq-100"
                 placeholder="输入消息"
-                readOnly
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault()
+                    sendMessage()
+                  }
+                }}
               />
               <button
-                className="inline-flex h-10 items-center gap-2 rounded-lg bg-qq-500 px-4 text-sm font-semibold text-white transition hover:bg-qq-600"
+                className={[
+                  'inline-flex h-10 items-center gap-2 rounded-lg px-4 text-sm font-semibold text-white transition',
+                  draftContent
+                    ? 'bg-qq-500 hover:bg-qq-600'
+                    : 'cursor-not-allowed bg-slate-300',
+                ].join(' ')}
                 type="button"
+                disabled={!draftContent}
+                onClick={sendMessage}
               >
                 <Send className="h-4 w-4" />
                 发送

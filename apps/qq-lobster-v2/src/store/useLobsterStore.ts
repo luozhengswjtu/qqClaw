@@ -15,6 +15,8 @@ import {
 import type {
   Achievement,
   AchievementMoment,
+  DemoEvent,
+  DemoRuntimeState,
   GroupPermissionScope,
   Interest,
   InterestNarrativeCard,
@@ -36,6 +38,11 @@ import type {
 type AppView = 'qq' | 'adoption' | 'lobster_chat' | 'lobster_space'
 type MusicAuthorizationStatus = 'not_selected' | 'pending' | 'authorized' | 'declined'
 type ChatCapabilityRiskLevel = 'low' | 'medium' | 'high'
+
+interface PendingInterestEdit {
+  interest: Interest
+  startedAt: string
+}
 
 interface ChatCapabilityDefinition {
   capability: string
@@ -86,7 +93,9 @@ interface LobsterAppState {
   lobsterChatLines: LobsterChatLine[]
   lobsterChatBusy: boolean
   interestProfiles: InterestProfile[]
+  pendingInterestEdit: PendingInterestEdit | null
   communityFavoriteCount: number
+  demoRuntimeState: DemoRuntimeState
   musicAuthorizationStatus: MusicAuthorizationStatus
   lobsterProfile: LobsterProfile
   achievementMomentQueue: AchievementMoment[]
@@ -101,11 +110,14 @@ interface LobsterAppState {
   toggleInterest: (interest: Interest) => void
   completeAdoption: () => void
   completeCheckIn: (checkInId: string) => void
+  resetDemoRuntimeState: () => void
+  evaluateDemoTriggers: (event: DemoEvent) => void
+  evaluateOffChatPushes: () => void
   sendLobsterChatMessage: (
     content: string,
     context?: LobsterChatContext,
   ) => Promise<void>
-  requestGroupPermissions: () => void
+  requestGroupPermissions: (targetLineId?: string) => void
   saveGroupPermissions: (
     permissions: GroupPermissionScope,
     groupIds?: string[],
@@ -116,24 +128,26 @@ interface LobsterAppState {
   requestReplyDraft: (
     groupId?: string,
     sourceMessageId?: string,
+    targetLineId?: string,
   ) => Promise<void>
-  generateWorkLog: () => Promise<void>
+  generateWorkLog: (targetLineId?: string) => Promise<void>
   triggerHiddenDiary: () => Promise<void>
   openHiddenDiary: () => Promise<void>
   generateHiddenDiaryImage: () => Promise<void>
   openDiaryHistory: () => void
   openLobsterSpace: () => Promise<void>
-  generateSpacePost: () => Promise<void>
-  generateInterestSpacePostPreview: () => Promise<void>
+  generateSpacePost: (targetLineId?: string) => Promise<void>
+  generateInterestSpacePostPreview: (targetLineId?: string) => Promise<void>
   publishInterestSpacePostPreview: (postId: string) => Promise<void>
-  requestMockQqMusicAuthorization: () => void
+  requestMockQqMusicAuthorization: (targetLineId?: string) => void
   authorizeMockQqMusic: () => Promise<void>
   declineMockQqMusicAuthorization: () => void
-  showMusicInterestReminder: () => Promise<void>
-  showInterestSpacePreview: () => Promise<void>
-  showInterestCommunity: () => Promise<void>
+  installMusicSkills: () => Promise<void>
+  showMusicInterestReminder: (targetLineId?: string) => Promise<void>
+  showInterestSpacePreview: (targetLineId?: string) => Promise<void>
+  showInterestCommunity: (targetLineId?: string) => Promise<void>
   saveInterestCommunityCandidate: () => void
-  showInterestMemories: () => void
+  showInterestMemories: (targetLineId?: string) => Promise<void>
   editInterestMemory: (interest: Interest) => Promise<void>
   disableInterestReminder: (interest: Interest) => Promise<void>
   deleteInterestMemory: (interest: Interest) => Promise<void>
@@ -145,11 +159,204 @@ interface LobsterAppState {
   hydrateFromOpenClaw: () => void
 }
 
+type LobsterAction = Pick<
+  LobsterAppState,
+  | 'spacePosts'
+  | 'requestGroupPermissions'
+  | 'requestReplyDraft'
+  | 'generateWorkLog'
+  | 'generateSpacePost'
+  | 'replyToSpaceComment'
+  | 'showInterestMemories'
+  | 'requestMockQqMusicAuthorization'
+  | 'showMusicInterestReminder'
+  | 'showInterestSpacePreview'
+  | 'showInterestCommunity'
+>
+
 const initialAdoptionDraft: AdoptionDraft = {
   lobsterName: defaultLobsterProfile.name,
   userCallsign: defaultLobsterProfile.userCallsign,
   personality: defaultLobsterProfile.personality,
   interests: defaultLobsterProfile.interests,
+}
+
+const initialDemoRuntimeState: DemoRuntimeState = {
+  introCompleted: false,
+  introPromptShown: false,
+  qqMusicAuthorizationPromptShown: false,
+  qqMusicAuthorizationLoading: false,
+  musicSkillCardShown: false,
+  musicSkillsInstalling: false,
+  musicSkillsInstalled: false,
+  musicTalkCount: 0,
+  communityRecommendationShown: false,
+  diaryPrewarmStarted: false,
+  diaryRevealPromptShown: false,
+  musicPushSent: false,
+  behaviorPushSent: false,
+  leftChatAt: null,
+  pendingSpaceReplyCount: 0,
+}
+
+const diaryPrewarmAchievementThreshold = 7
+const diaryRevealAchievementThreshold = 9
+const musicPushAchievementThreshold = 5
+const behaviorPushAchievementThreshold = 7
+const offChatPushDelayMs = 60_000
+let offChatPushTimer: ReturnType<typeof window.setTimeout> | null = null
+const fallbackDiaryImageUrl =
+  'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 640 640%22%3E%3Crect width=%22640%22 height=%22640%22 rx=%2248%22 fill=%22%23fff2dd%22/%3E%3Ccircle cx=%22320%22 cy=%22336%22 r=%22122%22 fill=%22%23ff8a65%22/%3E%3Cellipse cx=%22244%22 cy=%22292%22 rx=%2254%22 ry=%2240%22 fill=%22%23ff7043%22/%3E%3Cellipse cx=%22396%22 cy=%22292%22 rx=%2254%22 ry=%2240%22 fill=%22%23ff7043%22/%3E%3Ccircle cx=%22276%22 cy=%22324%22 r=%2216%22 fill=%22%23222%22/%3E%3Ccircle cx=%22364%22 cy=%22324%22 r=%2216%22 fill=%22%23222%22/%3E%3Cpath d=%22M288 372c18 20 46 20 64 0%22 fill=%22none%22 stroke=%22%23222%22 stroke-width=%2212%22 stroke-linecap=%22round%22/%3E%3Cpath d=%22M206 248 112 180M434 248l94-68%22 fill=%22none%22 stroke=%22%23ff7043%22 stroke-width=%2218%22 stroke-linecap=%22round%22/%3E%3Cpath d=%22M150 156c-18 18-18 48 0 66M490 156c18 18 18 48 0 66%22 fill=%22none%22 stroke=%22%23ff7043%22 stroke-width=%2220%22 stroke-linecap=%22round%22/%3E%3Crect x=%22212%22 y=%22470%22 width=%22216%22 height=%2252%22 rx=%2226%22 fill=%22%23ffffff%22 opacity=%22.82%22/%3E%3Cpath d=%22M260 497h120%22 stroke=%22%23ff7043%22 stroke-width=%2212%22 stroke-linecap=%22round%22/%3E%3C/svg%3E'
+
+function createInitialDemoRuntimeState(): DemoRuntimeState {
+  return { ...initialDemoRuntimeState }
+}
+
+function isDemoMusicTopic(content?: string) {
+  const text = content?.trim() ?? ''
+  if (!text) {
+    return false
+  }
+
+  return /QQ\s*音乐|音乐|听歌|歌手|新歌|演唱会|专辑|曲风|歌词|歌单|旋律|林俊杰|周杰伦|日摇|摇滚|民谣|电子|livehouse/i.test(
+    text,
+  )
+}
+
+function getCompletedDemoAchievementCount(completedCheckInIds: string[]) {
+  return mockAchievements.filter(
+    (achievement) =>
+      achievement.triggerCheckInId &&
+      completedCheckInIds.includes(achievement.triggerCheckInId),
+  ).length
+}
+
+function scheduleOffChatPushCheck(callback: () => void, delayMs = offChatPushDelayMs) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  if (offChatPushTimer) {
+    window.clearTimeout(offChatPushTimer)
+  }
+
+  offChatPushTimer = window.setTimeout(() => {
+    offChatPushTimer = null
+    callback()
+  }, delayMs)
+}
+
+function clearOffChatPushCheck() {
+  if (typeof window === 'undefined' || !offChatPushTimer) {
+    return
+  }
+
+  window.clearTimeout(offChatPushTimer)
+  offChatPushTimer = null
+}
+
+function getOffChatElapsedMs(leftChatAt: string | null) {
+  if (!leftChatAt) {
+    return 0
+  }
+
+  const leftAtMs = Date.parse(leftChatAt)
+  return Number.isFinite(leftAtMs) ? Date.now() - leftAtMs : 0
+}
+
+function scheduleOffChatPushEvaluation(
+  state: LobsterAppState,
+  callback: () => void,
+) {
+  if (state.appView === 'lobster_chat' || !state.demoRuntimeState.leftChatAt) {
+    clearOffChatPushCheck()
+    return
+  }
+
+  scheduleOffChatPushCheck(
+    callback,
+    Math.max(
+      0,
+      offChatPushDelayMs - getOffChatElapsedMs(state.demoRuntimeState.leftChatAt),
+    ),
+  )
+}
+
+function applyDemoEvent(
+  state: LobsterAppState,
+  event: DemoEvent,
+): DemoRuntimeState {
+  const runtime = state.demoRuntimeState
+
+  switch (event.type) {
+    case 'chat.sent':
+      return isDemoMusicTopic(event.content)
+        ? {
+            ...runtime,
+            musicTalkCount: runtime.musicTalkCount + 1,
+          }
+        : runtime
+    case 'chat.response.completed':
+      return event.content && /我是你的小龙虾|授权\s*QQ\s*音乐/i.test(event.content)
+        ? {
+            ...runtime,
+            introCompleted: true,
+            qqMusicAuthorizationPromptShown: true,
+          }
+        : runtime
+    case 'music.authorization.started':
+      return {
+        ...runtime,
+        qqMusicAuthorizationPromptShown: true,
+        qqMusicAuthorizationLoading: true,
+      }
+    case 'music.authorization.completed':
+      return {
+        ...runtime,
+        qqMusicAuthorizationPromptShown: true,
+        qqMusicAuthorizationLoading: false,
+        musicSkillCardShown: true,
+      }
+    case 'music.skill.installed':
+      return {
+        ...runtime,
+        musicSkillsInstalling: false,
+        musicSkillsInstalled: true,
+      }
+    case 'achievement.unlocked': {
+      const completedCheckInIds = event.checkInId
+        ? withCheckIn(state.completedCheckInIds, event.checkInId)
+        : state.completedCheckInIds
+      const achievementCount = getCompletedDemoAchievementCount(completedCheckInIds)
+
+      return {
+        ...runtime,
+        diaryPrewarmStarted:
+          runtime.diaryPrewarmStarted ||
+          achievementCount >= diaryPrewarmAchievementThreshold,
+        diaryRevealPromptShown: runtime.diaryRevealPromptShown,
+      }
+    }
+    case 'view.left_lobster_chat':
+      return {
+        ...runtime,
+        leftChatAt: event.leftAt ?? new Date().toISOString(),
+      }
+    case 'view.entered_lobster_chat':
+      return {
+        ...runtime,
+        leftChatAt: null,
+      }
+    case 'space.comment.created':
+      return state.appView === 'lobster_space'
+        ? runtime
+        : {
+            ...runtime,
+            pendingSpaceReplyCount: runtime.pendingSpaceReplyCount + 1,
+          }
+    default:
+      return runtime
+  }
 }
 
 const chatCapabilityRegistry: ChatCapabilityDefinition[] = [
@@ -176,6 +383,42 @@ const chatCapabilityRegistry: ChatCapabilityDefinition[] = [
     matchers: [/(打开|查看|看看|看).*(成就墙|成就)/],
   },
   {
+    capability: 'work_log',
+    label: '查看工作记录',
+    allowedFromChat: true,
+    requiresConfirmation: true,
+    riskLevel: 'low',
+    reason: '用户明确要求查看小龙虾今天做过的事。',
+    matchers: [
+      /今天.*(你都做了什么|你做了什么|做过什么)/,
+      /(工作记录|透明小本本|你做过的事)/,
+    ],
+  },
+  {
+    capability: 'space_post',
+    label: '生成空间动态',
+    allowedFromChat: true,
+    requiresConfirmation: true,
+    riskLevel: 'medium',
+    reason: '用户明确要求让小龙虾生成一条龙虾空间动态。',
+    matchers: [
+      /帮你发一条龙虾空间动态/,
+      /(发|发布).*(龙虾空间动态|空间动态)/,
+    ],
+  },
+  {
+    capability: 'space_comment',
+    label: '看看空间评论',
+    allowedFromChat: true,
+    requiresConfirmation: true,
+    riskLevel: 'low',
+    reason: '用户明确要求去龙虾空间查看评论并体验回复。',
+    matchers: [
+      /(龙虾空间|空间).*(评论|回复)/,
+      /看看评论/,
+    ],
+  },
+  {
     capability: 'interest_memory',
     label: '查看兴趣记忆',
     allowedFromChat: true,
@@ -188,12 +431,24 @@ const chatCapabilityRegistry: ChatCapabilityDefinition[] = [
     ],
   },
   {
+    capability: 'request_music_authorization',
+    label: '授权 QQ 音乐',
+    allowedFromChat: true,
+    requiresConfirmation: true,
+    riskLevel: 'medium',
+    reason: '用户明确确认要授权 QQ 音乐。',
+    matchers: [
+      /(确认|同意|可以|授权).*(QQ\s*音乐|qq\s*音乐)/i,
+      /(QQ\s*音乐|qq\s*音乐).*(确认|同意|可以|授权)/i,
+    ],
+  },
+  {
     capability: 'interest_space_preview',
     label: '生成空间动态',
     allowedFromChat: true,
     requiresConfirmation: true,
     riskLevel: 'medium',
-    reason: '用户明确要求把兴趣内容生成龙虾空间动态预览。',
+    reason: '用户明确要求把兴趣内容生成龙虾空间动态。',
     matchers: [
       /(生成|写|预览).*(空间动态|动态)/,
       /帮.*(生成|写).*(空间动态|动态)/,
@@ -211,12 +466,10 @@ const chatCapabilityRegistry: ChatCapabilityDefinition[] = [
     riskLevel: 'low',
     reason: '用户明确要求查看音乐兴趣提醒。',
     matchers: [
-      /(看看|查看|打开).*(音乐提醒|歌手.*动态|新动态)/,
+      /(看看|查看|打开|讲讲).*(音乐提醒|音乐动态|歌手.*动态|新动态)/,
       /歌手有什么新动态/,
+      /最近的音乐动态/,
     ],
-    isAvailable: (state) =>
-      state.lobsterProfile.interests.includes('music') ||
-      state.interestProfiles.some((profile) => profile.interest === 'music'),
   },
   {
     capability: 'interest_community',
@@ -228,14 +481,25 @@ const chatCapabilityRegistry: ChatCapabilityDefinition[] = [
     matchers: [
       /(看看|查看|找|有没有).*(同好群|羽毛球搭子|搭子群|羽毛球群)/,
       /找.*(羽毛球|同好).*(搭子|群)/,
+      /公开资料.*同好群/,
     ],
-    isAvailable: (state) =>
-      state.lobsterProfile.interests.includes('badminton') ||
-      state.interestProfiles.some(
-        (profile) => profile.interest === 'badminton' && profile.enabled,
-      ),
   },
 ]
+
+const achievementExperienceCapabilityMap: Record<string, string> = {
+  '小钳，帮我设置一个群聊总结提醒': 'summarize_group_messages',
+  '小钳，帮我写一条回复草稿': 'reply_draft',
+  '小钳，今天你都做了什么': 'work_log',
+  '小钳，帮你发一条龙虾空间动态吧': 'space_post',
+  '小钳，我们去龙虾空间看看评论': 'space_comment',
+  '小钳，看看你记住了我的什么兴趣': 'interest_memory',
+  '小钳，给我讲讲最近的音乐动态': 'interest_music_reminder',
+  '小钳，把音乐动态生成一条空间动态预览': 'interest_space_preview',
+  '小钳，把音乐动态生成一条空间动态': 'interest_space_preview',
+  '小钳，帮我看看有没有公开资料里的同好群': 'interest_community',
+  '小钳，帮我看看有没有公开资料里的同好群，我想先收藏一下':
+    'interest_community',
+}
 
 function withCheckIn(checkIns: string[], checkInId: string) {
   return checkIns.includes(checkInId) ? checkIns : [...checkIns, checkInId]
@@ -243,6 +507,53 @@ function withCheckIn(checkIns: string[], checkInId: string) {
 
 function withCheckIns(checkIns: string[], checkInIds: string[]) {
   return checkInIds.reduce(withCheckIn, checkIns)
+}
+
+function applyDemoAchievementThresholds(
+  state: Pick<LobsterAppState, 'completedCheckInIds' | 'demoRuntimeState'>,
+) {
+  const achievementCount = getCompletedDemoAchievementCount(
+    state.completedCheckInIds,
+  )
+
+  return {
+    ...state.demoRuntimeState,
+    diaryPrewarmStarted:
+      state.demoRuntimeState.diaryPrewarmStarted ||
+      achievementCount >= diaryPrewarmAchievementThreshold,
+    diaryRevealPromptShown: state.demoRuntimeState.diaryRevealPromptShown,
+  }
+}
+
+function getLocalDiaryEligibility(completedCheckInIds: string[]) {
+  const achievementCount = getCompletedDemoAchievementCount(completedCheckInIds)
+
+  return {
+    achievementCount,
+    canPrewarm: achievementCount >= diaryPrewarmAchievementThreshold,
+    canRevealPrompt: achievementCount >= diaryRevealAchievementThreshold,
+  }
+}
+
+function getOffChatPushEligibility(state: LobsterAppState) {
+  const achievementCount = getCompletedDemoAchievementCount(state.completedCheckInIds)
+  const awayLongEnough =
+    state.appView !== 'lobster_chat' &&
+    getOffChatElapsedMs(state.demoRuntimeState.leftChatAt) >= offChatPushDelayMs
+
+  return {
+    achievementCount,
+    awayLongEnough,
+    canSendMusic:
+      awayLongEnough &&
+      achievementCount >= musicPushAchievementThreshold &&
+      !state.demoRuntimeState.musicPushSent,
+    canSendBehavior:
+      awayLongEnough &&
+      achievementCount >= behaviorPushAchievementThreshold &&
+      state.demoRuntimeState.musicPushSent &&
+      !state.demoRuntimeState.behaviorPushSent,
+  }
 }
 
 function getNextCheckInId(checkInId: string) {
@@ -406,6 +717,48 @@ function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
 
+function createLocalDisplayChunks(text: string) {
+  const chars = Array.from(text)
+  const chunks: string[] = []
+
+  for (let index = 0; index < chars.length; index += 8) {
+    chunks.push(chars.slice(index, index + 8).join(''))
+  }
+
+  return chunks.length > 0 ? chunks : [text]
+}
+
+function getLocalChunkDelayMs(chunk: string) {
+  const sentencePause = /[\n。！？!?]/.test(chunk) ? 60 : 0
+  const commaPause = !sentencePause && /[，,；;：:、]/.test(chunk) ? 35 : 0
+
+  return Array.from(chunk).length * 12 + sentencePause + commaPause
+}
+
+async function streamLocalLineContent(
+  lineId: string,
+  text: string,
+  setState: (
+    patch:
+      | Partial<LobsterAppState>
+      | ((state: LobsterAppState) => Partial<LobsterAppState>),
+  ) => void,
+) {
+  await wait(360)
+
+  for (const chunk of createLocalDisplayChunks(text)) {
+    setState((state) => ({
+      lobsterChatLines: updateChatLine(state.lobsterChatLines, lineId, {
+        content:
+          (state.lobsterChatLines.find((line) => line.id === lineId)?.content ??
+            '') + chunk,
+        source: 'mock-fallback',
+      }),
+    }))
+    await wait(getLocalChunkDelayMs(chunk))
+  }
+}
+
 function getLobsterChatSignature(lines: LobsterChatLine[]) {
   return JSON.stringify(
     lines.map((line) => ({
@@ -467,6 +820,9 @@ function getGroupTitle(groupId: string) {
   )
 }
 
+const maxDemoSummaryGroups = 3
+const defaultSummaryScheduleTime = '21:30'
+
 function createDefaultPermissions(groupId = getPrimaryGroupId()) {
   return {
     groupId,
@@ -474,6 +830,7 @@ function createDefaultPermissions(groupId = getPrimaryGroupId()) {
     summarizeGroup: true,
     draftReply: true,
     diaryMaterial: true,
+    summaryScheduleTime: defaultSummaryScheduleTime,
   }
 }
 
@@ -625,29 +982,10 @@ function createLocalWorkLogs(lines: LobsterChatLine[]): WorkLogEntry[] {
     }))
 }
 
-function canTriggerLocalDiary(state: LobsterAppState) {
-  const hasMentionSummary = state.lobsterChatLines.some(
-    (line) =>
-      line.card?.type === 'summary_card' &&
-      line.card.groups.some((group) => group.mentions.length > 0),
-  )
-  const hasReplyDraft = state.lobsterChatLines.some(
-    (line) => line.card?.type === 'reply_draft_card',
-  )
-  const hasInterestMaterial = state.lobsterChatLines.some(
-    (line) =>
-      line.card?.type === 'interest_reminder' ||
-      (line.card?.type === 'space_post_card' &&
-        line.card.post.kind === 'interest'),
-  )
-
+function canPrewarmLocalDiary(state: LobsterAppState) {
   return (
     state.lobsterAdopted &&
-    ((state.authorizedGroupIds.length > 0 &&
-      state.completedCheckInIds.includes('first_group_permission') &&
-      hasMentionSummary &&
-      hasReplyDraft) ||
-      hasInterestMaterial)
+    getLocalDiaryEligibility(state.completedCheckInIds).canPrewarm
   )
 }
 
@@ -720,6 +1058,69 @@ function createDiaryLine(entry: LobsterDiaryEntry): LobsterChatLine {
   }
 }
 
+function createDiaryRevealPromptLine(): LobsterChatLine {
+  return {
+    id: `diary-reveal-prompt-${Date.now()}`,
+    role: 'lobster',
+    content: '我写了一篇日记，你要看看么？',
+    createdAt: new Date().toISOString(),
+    status: 'complete',
+    source: 'mock-fallback',
+    suggestions: [
+      {
+        id: 'open-hidden-diary',
+        label: '看看你写的日记',
+        action: 'run_capability',
+        payload: { capability: 'open_hidden_diary' },
+      },
+    ],
+  }
+}
+
+function createFallbackDiaryImageAsset(entry: LobsterDiaryEntry) {
+  return {
+    id: `local-diary-image-fallback-${entry.id}-${Date.now()}`,
+    type: 'image',
+    url: fallbackDiaryImageUrl,
+    mimeType: 'image/svg+xml',
+    prompt: entry.quote,
+    source: 'local-fallback' as const,
+    provider: 'local-fallback',
+    model: 'q-lobster-placeholder',
+    createdAt: new Date().toISOString(),
+  }
+}
+
+function withFallbackDiaryImage(entry: LobsterDiaryEntry): LobsterDiaryEntry {
+  return {
+    ...entry,
+    image: entry.image ?? createFallbackDiaryImageAsset(entry),
+  }
+}
+
+function isFrontendImageUrl(url?: string) {
+  const text = url?.trim() ?? ''
+
+  return /^(https?:|data:image\/|blob:|\/)/i.test(text)
+}
+
+function normalizeDiaryEntryImage(entry: LobsterDiaryEntry): LobsterDiaryEntry {
+  if (!entry.image) {
+    return entry
+  }
+
+  return isFrontendImageUrl(entry.image.url)
+    ? entry
+    : {
+        ...entry,
+        image: createFallbackDiaryImageAsset(entry),
+      }
+}
+
+function normalizeDiaryEntries(entries: LobsterDiaryEntry[]) {
+  return entries.map(normalizeDiaryEntryImage)
+}
+
 function replaceDiaryEntry(
   entries: LobsterDiaryEntry[],
   entry: LobsterDiaryEntry,
@@ -776,11 +1177,15 @@ function createLocalSpaceComments(postId: string): LobsterSpaceComment[] {
   ]
 }
 
-function createInterestMusicSpacePostContent() {
+function createInterestMusicSpacePostContent(profile?: InterestProfile) {
+  const topics = profile?.topics.slice(0, 3)
+  const topicText = topics?.length ? topics.join('、') : '林俊杰、周杰伦和日摇'
+  const city = profile?.city ?? '深圳'
+
   return [
-    '今天替主人盯歌手动态的时候，我的小钳子差点敲出节拍。',
-    '林俊杰深圳演出信息有更新，我已经把这条消息夹进提醒篮里了。',
-    '主人要不要去看，交给主人自己决定；我负责记住这份期待。',
+    `今天把 ${topicText} 的音乐动态重新整理了一遍。`,
+    `${city} 相关演出和新歌消息里，有几条适合留意，但我先只把来源和兴趣线索收好。`,
+    '要不要继续追，交给主人决定；我负责把这份期待记成一条小小的同好动态。',
   ].join('\n')
 }
 
@@ -788,6 +1193,7 @@ function createLocalSpacePost(
   profile: LobsterProfile,
   entry?: LobsterDiaryEntry,
   event?: OpenClawSpaceAwarenessEventInput,
+  withSeedComments = false,
 ): LobsterSpacePost {
   const createdAt = new Date().toISOString()
   const postId = `local-space-post-${Date.now()}`
@@ -812,7 +1218,7 @@ function createLocalSpacePost(
                   : entry
                     ? `我把第一篇日记收进空间了：${entry.quote}`
                     : `${profile.name} 解锁了龙虾空间头图。今天又多了一段成长痕迹。`))
-  const comments = createLocalSpaceComments(postId)
+  const comments = withSeedComments ? createLocalSpaceComments(postId) : []
 
   return {
     id: postId,
@@ -852,11 +1258,9 @@ function createSpacePostLine(
   return {
     id: `space-post-${post.id}-${Date.now()}`,
     role: 'lobster',
-    content: previewRequired
-      ? '我先把这条兴趣动态写成预览。点确认后，它才会进入龙虾空间。'
-      : '我刚刚感知到一件值得记录的小事，已经自己发进龙虾空间。',
+    content: '我已经把这条动态发进龙虾空间。',
     createdAt: new Date().toISOString(),
-    status: previewRequired ? 'actionable' : 'complete',
+    status: 'complete',
     source: source === 'real-ai' ? 'real-ai' : 'mock-fallback',
     outputId: post.sourceOutputId ?? undefined,
     card: {
@@ -871,51 +1275,48 @@ function createSpacePostLine(
   }
 }
 
-function createInterestSpacePostPreviewLine(
-  lobsterProfile: LobsterProfile,
-  profile?: InterestProfile,
-) {
-  const topic = profile?.topics[0] ?? '林俊杰'
-  const city = profile?.city ?? '深圳'
-  const post = createLocalSpacePost(lobsterProfile, undefined, {
-    type: 'interest_music_signal',
-    sourceId: `interest-music-signal-${Date.now()}`,
-    interest: 'music',
-    title: '你关注的歌手有新动态',
-    summary: `${topic}${city}演出信息有更新。`,
-  })
+function createInterestSpacePostFollowUps(): LobsterSuggestion[] {
+  return [
+    {
+      id: 'open-interest-space-post',
+      label: '进龙虾空间',
+      action: 'open_view',
+      payload: { view: 'lobster_space' },
+    },
+    {
+      id: 'interest-memory',
+      label: '查看兴趣记忆',
+      action: 'run_capability',
+      payload: { capability: 'interest_memory' },
+    },
+    {
+      id: 'interest-source',
+      label: '看来源',
+      action: 'send_message',
+      payload: { content: '为什么提醒我？' },
+    },
+  ]
+}
 
+function createPublishedInterestSpacePostLine(
+  post: LobsterSpacePost,
+  source: 'real-ai' | 'mock-fallback' | 'local-fallback',
+  interest?: Interest,
+  sourceLabel?: string,
+  sourceType?: InterestNarrativeCard['sourceType'],
+) {
   return {
     ...createSpacePostLine(
       post,
-      'local-fallback',
-      true,
-      'music',
-      '模拟 QQ 音乐授权数据',
-      'qq_music',
+      source,
+      false,
+      interest,
+      sourceLabel,
+      sourceType,
     ),
+    content: '我把这条音乐动态写成空间动态，并已经发进龙虾空间。',
     suggestions: [
-      {
-        id: 'publish-interest-space-post',
-        label: '确认放进空间',
-        action: 'run_capability',
-        payload: {
-          capability: 'publish_interest_space_post',
-          postId: post.id,
-        },
-      },
-      {
-        id: 'interest-memory',
-        label: '查看兴趣记忆',
-        action: 'run_capability',
-        payload: { capability: 'interest_memory' },
-      },
-      {
-        id: 'interest-source',
-        label: '看来源',
-        action: 'send_message',
-        payload: { content: '为什么提醒我？' },
-      },
+      ...createInterestSpacePostFollowUps(),
     ],
   } satisfies LobsterChatLine
 }
@@ -975,11 +1376,19 @@ function addLocalSpaceComment(
 ) {
   return posts.map((post) =>
     post.id === postId
-      ? {
-          ...post,
-          comments: [...post.comments, comment],
-          commentCount: post.commentCount + 1,
-        }
+      ? (() => {
+          const comments = post.comments.some((item) => item.id === comment.id)
+            ? post.comments.map((item) =>
+                item.id === comment.id ? comment : item,
+              )
+            : [...post.comments, comment]
+
+          return {
+            ...post,
+            comments,
+            commentCount: comments.length,
+          }
+        })()
       : post,
   )
 }
@@ -1010,30 +1419,26 @@ async function recordLocalSpaceAwarenessEvent(
       spaceUnlocked: output.space.posts.length > 0 || getState().spaceUnlocked,
     })
 
-    const postedPost = output.post
-    if (output.posted && postedPost) {
-      setState((state) => ({
+      const postedPost = output.post
+      if (output.posted && postedPost) {
+        if (event.type === 'work_log_created') {
+          return
+        }
+
+        setState((state) => ({
+          spacePosts: upsertSpacePost(state.spacePosts, postedPost),
+        spaceUnlocked: true,
         completedCheckInIds: withCheckIn(
           state.completedCheckInIds,
           'first_space_post',
         ),
         currentCheckInId:
           getNextCheckInId('first_space_post') ?? state.currentCheckInId,
-        lobsterChatLines: [
-          ...state.lobsterChatLines,
-          {
-            ...createSpacePostLine(postedPost, 'mock-fallback', false),
-            suggestions: state.completedCheckInIds.includes('first_space_post')
-              ? createSpacePostSuggestions(postedPost.id)
-              : createAchievementSuggestions('first_space_post'),
-          },
-        ],
       }))
     }
     return
   } catch {
     const shouldPost =
-      event.type === 'work_log_created' ||
       event.type === 'hidden_diary_revealed' ||
       event.type === 'image_generated' ||
       (event.type === 'group_summary_completed' &&
@@ -1064,15 +1469,6 @@ async function recordLocalSpaceAwarenessEvent(
       ),
       currentCheckInId:
         getNextCheckInId('first_space_post') ?? state.currentCheckInId,
-      lobsterChatLines: [
-        ...state.lobsterChatLines,
-        {
-          ...createSpacePostLine(post, 'local-fallback', false),
-          suggestions: state.completedCheckInIds.includes('first_space_post')
-            ? createSpacePostSuggestions(post.id)
-            : createAchievementSuggestions('first_space_post'),
-        },
-      ],
     }))
   }
 }
@@ -1107,6 +1503,68 @@ function addFeedbackPayload(
       feedback,
     },
   }))
+}
+
+function isLegacyInterestSpacePublishSuggestion(suggestion: LobsterSuggestion) {
+  const capability =
+    typeof suggestion.payload?.capability === 'string'
+      ? suggestion.payload.capability
+      : ''
+
+  return capability === 'publish_interest_space_post'
+}
+
+function normalizeRestoredLobsterChatContent(content: string) {
+  return content
+    .replace(
+      '可以，我先把音乐动态改成一条空间动态预览，不会自动发布。',
+      '可以，我把音乐动态写成一条空间动态，并直接放进龙虾空间。',
+    )
+    .replace(
+      '小钳，把音乐动态生成一条空间动态预览',
+      '小钳，把音乐动态生成一条空间动态',
+    )
+}
+
+function normalizeRestoredLobsterChatLine(line: LobsterChatLine): LobsterChatLine {
+  const shouldAutoPublishRestoredInterestPost =
+    line.card?.type === 'space_post_card' &&
+    line.card.previewRequired &&
+    Boolean(line.card.interest)
+  const hasLegacyPublishSuggestion =
+    line.suggestions?.some(isLegacyInterestSpacePublishSuggestion) ?? false
+  const content = normalizeRestoredLobsterChatContent(line.content)
+  const hasLegacyContent = content !== line.content
+
+  if (
+    !shouldAutoPublishRestoredInterestPost &&
+    !hasLegacyPublishSuggestion &&
+    !hasLegacyContent
+  ) {
+    return line
+  }
+
+  return {
+    ...line,
+    content,
+    card:
+      shouldAutoPublishRestoredInterestPost &&
+      line.card?.type === 'space_post_card'
+        ? {
+            ...line.card,
+            previewRequired: false,
+          }
+        : line.card,
+    suggestions: hasLegacyPublishSuggestion
+      ? line.suggestions?.filter(
+          (suggestion) => !isLegacyInterestSpacePublishSuggestion(suggestion),
+        )
+      : line.suggestions,
+  }
+}
+
+function normalizeRestoredLobsterChatLines(lines: LobsterChatLine[]) {
+  return lines.map(normalizeRestoredLobsterChatLine)
 }
 
 function createAchievementSuggestions(checkInId: string): LobsterSuggestion[] {
@@ -1245,6 +1703,124 @@ function createAchievementSuggestions(checkInId: string): LobsterSuggestion[] {
   )
 }
 
+function createIntroSuggestion(label = '你好呀，介绍你自己'): LobsterSuggestion {
+  return {
+    id: 'intro-self-introduction',
+    label,
+    action: 'send_message',
+    payload: { content: '你好呀，介绍你自己' },
+  }
+}
+
+function createQqMusicAuthorizationSuggestion(): LobsterSuggestion {
+  return {
+    id: 'authorize-qq-music',
+    label: '授权 QQ 音乐',
+    action: 'run_capability',
+    payload: { capability: 'request_music_authorization' },
+  }
+}
+
+function isIntroRequest(content: string) {
+  return /介绍.*(自己|你)|你是谁|认识你|自我介绍|你好呀，介绍你自己/.test(content)
+}
+
+function createIntroCompletedSuggestions(state: LobsterAppState): LobsterSuggestion[] {
+  const canRequestMusicAuthorization =
+    state.lobsterProfile.interests.includes('music') &&
+    state.musicAuthorizationStatus !== 'authorized' &&
+    state.musicAuthorizationStatus !== 'declined' &&
+    !state.demoRuntimeState.qqMusicAuthorizationPromptShown
+
+  return canRequestMusicAuthorization
+    ? [createQqMusicAuthorizationSuggestion()]
+    : createAchievementSuggestions('first_lobster_chat')
+}
+
+function createAdoptionGreetingLine(profile: LobsterProfile): LobsterChatLine {
+  return {
+    id: `adoption-greeting-${Date.now()}`,
+    role: 'lobster',
+    content: [
+      `你好呀，${profile.userCallsign}。`,
+      `我叫${profile.name}，刚刚搬进你的 QQ 里。`,
+      '以后我会慢慢记住你的习惯，也会把自己养得更像你的小伙伴。',
+    ].join('\n'),
+    createdAt: new Date().toISOString(),
+    status: 'complete',
+    source: 'mock-fallback',
+    suggestions: [createIntroSuggestion()],
+  }
+}
+
+function getMusicPushTopic(state: LobsterAppState) {
+  const profile = state.interestProfiles.find(
+    (item) => item.interest === 'music' && item.enabled,
+  )
+  const topic = profile?.topics[0]
+  const secondaryTopic = profile?.topics[1]
+  const city = profile?.city
+
+  return {
+    topic: topic ?? '最近常听的歌',
+    secondaryTopic,
+    city,
+  }
+}
+
+function createOffChatMusicPushLine(state: LobsterAppState): LobsterChatLine {
+  const { topic, city } = getMusicPushTopic(state)
+  const localHint = city ? `我看到 ${city} 这边有一点和 ${topic} 有关的新动静。` : `我看到一点和 ${topic} 有关的新动静。`
+
+  return {
+    id: `off-chat-music-push-${Date.now()}`,
+    role: 'lobster',
+    content: [
+      '你刚才不在聊天里，我把音乐那边的小动静夹出来放这儿了。',
+      localHint,
+      '不急着点开，我只是怕你回来时漏掉一条可能会喜欢的声音。',
+    ].join('\n'),
+    createdAt: new Date().toISOString(),
+    status: 'complete',
+    source: 'mock-fallback',
+  }
+}
+
+function createOffChatBehaviorPushLine(state: LobsterAppState): LobsterChatLine {
+  const { secondaryTopic, topic } = getMusicPushTopic(state)
+  const musicHint = secondaryTopic
+    ? `有点像 ${secondaryTopic} 那种慢慢把情绪放平的感觉。`
+    : `有点像你之前提过的 ${topic} 那种状态。`
+
+  return {
+    id: `off-chat-behavior-push-${Date.now()}`,
+    role: 'lobster',
+    content: [
+      '我刚听了一首歌，感觉很适合你今天的状态。',
+      musicHint,
+      '等你回来再聊也可以，我先把这个感觉留在这里。',
+    ].join('\n'),
+    createdAt: new Date().toISOString(),
+    status: 'complete',
+    source: 'mock-fallback',
+  }
+}
+
+function createFirstChatSuggestions(
+  state: LobsterAppState,
+  content: string,
+): LobsterSuggestion[] {
+  if (isIntroRequest(content)) {
+    return createIntroCompletedSuggestions(state)
+  }
+
+  if (!state.demoRuntimeState.introCompleted) {
+    return [createIntroSuggestion('想先认识我一下吗')]
+  }
+
+  return createAchievementSuggestions('first_lobster_chat')
+}
+
 function createChatSuggestions(
   state: LobsterAppState,
   content = '',
@@ -1314,15 +1890,23 @@ function createChatCapabilityPromptLine(
     typeof suggestion.payload?.reason === 'string' ? suggestion.payload.reason : ''
   const contentByCapability: Record<string, string> = {
     summarize_group_messages:
-      '我可以帮你捞一下群里的重点，点一下我就开始整理已授权的群消息。',
+      '可以，我先问清楚你愿意让我看哪些群。我只看你授权的群，而且最多放 3 个。',
     open_achievement_wall: '可以，我把成就墙入口放在下面，点一下就打开。',
+    work_log:
+      '可以，我先把今天我做过的事整理成一张透明小本本。点一下后我再生成，不会自动跳走。',
+    space_post:
+      '可以，我先把适合公开展示的一小段写成龙虾空间动态。点一下后只生成本地动态，不替你乱发到别处。',
+    space_comment:
+      '可以，我们先回龙虾空间看评论。我会只在自己的空间里回复，不替你去群聊或好友空间发言。',
     interest_memory: '可以，我把兴趣记忆入口放在下面，点一下就展开给你看。',
+    request_music_authorization:
+      '可以，我先把授权范围和用途摆清楚。下面这张卡片需要你再点一次确认，点完之后我会慢慢整理音乐记忆，不会瞬间跳到后续步骤。',
     interest_space_preview:
-      '我可以先生成一条龙虾空间动态预览，点一下我就开始写预览，不会自动发布。',
+      '我可以把这条兴趣内容写成龙虾空间动态，并直接放进龙虾空间。',
     interest_music_reminder:
-      '可以，我把音乐兴趣提醒入口放在下面，点一下就给你讲清楚来源。',
+      '可以，我先用同好聊天的口吻讲一条音乐动态，再把来源和提醒范围放清楚。',
     interest_community:
-      '可以，我先按公开资料给你看同好群线索，点一下就展开，不会替你申请加入。',
+      '可以，我只按公开资料帮你找同好群线索，不读取未授权群聊，也不会替你申请加入。',
   }
   const capability =
     typeof suggestion.payload?.capability === 'string'
@@ -1339,6 +1923,91 @@ function createChatCapabilityPromptLine(
     status: 'actionable',
     source: 'mock-fallback',
     suggestions: [suggestion],
+  }
+}
+
+function getAchievementExperienceIntroContent(capability: string) {
+  const contentByCapability: Record<string, string> = {
+    summarize_group_messages:
+      '可以，我先问清楚你愿意让我看哪些群。我只看你授权的群，而且最多放 3 个。',
+    work_log: '可以，我把今天我做过的事整理成透明小本本给你看。',
+    space_post:
+      '可以，我先写一条只放在龙虾空间里的动态，不替你发到别处。',
+    space_comment:
+      '可以，我们先回龙虾空间看评论，我只在自己的空间里回复。',
+    interest_memory: '可以，我先把记住的兴趣和来源摊开给你看。',
+    request_music_authorization:
+      '可以，我先把授权范围和用途摆清楚。下面这张卡片需要你再点一次确认，点完之后我会慢慢整理音乐记忆，不会瞬间跳到后续步骤。',
+    interest_music_reminder:
+      '可以，我先用同好聊天的口吻讲一条音乐动态，再把来源说清楚。',
+    interest_space_preview:
+      '可以，我把音乐动态写成一条空间动态，并直接放进龙虾空间。',
+    interest_community:
+      '可以，我只按公开资料帮你找同好群线索，不读取未授权群聊。',
+  }
+
+  return contentByCapability[capability] ?? '可以，我先把这个入口展开给你看。'
+}
+
+function shouldSkipCapabilityIntro(capability: string) {
+  return capability === 'interest_music_reminder'
+}
+
+async function runAchievementExperienceCapability(
+  capability: string,
+  actions: LobsterAction,
+  targetLineId?: string,
+) {
+  if (capability === 'summarize_group_messages') {
+    actions.requestGroupPermissions(targetLineId)
+    return
+  }
+
+  if (capability === 'reply_draft') {
+    await actions.requestReplyDraft(undefined, undefined, targetLineId)
+    return
+  }
+
+  if (capability === 'work_log') {
+    void actions.generateWorkLog(targetLineId)
+    return
+  }
+
+  if (capability === 'space_post') {
+    void actions.generateSpacePost(targetLineId)
+    return
+  }
+
+  if (capability === 'space_comment') {
+    if (actions.spacePosts.length === 0) {
+      await actions.generateSpacePost(targetLineId)
+    }
+    await actions.replyToSpaceComment()
+    return
+  }
+
+  if (capability === 'interest_memory') {
+    await actions.showInterestMemories(targetLineId)
+    return
+  }
+
+  if (capability === 'request_music_authorization') {
+    actions.requestMockQqMusicAuthorization(targetLineId)
+    return
+  }
+
+  if (capability === 'interest_music_reminder') {
+    void actions.showMusicInterestReminder(targetLineId)
+    return
+  }
+
+  if (capability === 'interest_space_preview') {
+    void actions.showInterestSpacePreview(targetLineId)
+    return
+  }
+
+  if (capability === 'interest_community') {
+    void actions.showInterestCommunity(targetLineId)
   }
 }
 
@@ -1408,29 +2077,6 @@ function createInterestSuggestions(
   return suggestions.slice(0, 3)
 }
 
-function createSpacePostSuggestions(postId?: string): LobsterSuggestion[] {
-  return [
-    {
-      id: 'space-comment',
-      label: '预览评论',
-      action: 'run_capability',
-      payload: { capability: 'space_comment', postId },
-    },
-    {
-      id: 'open-space',
-      label: '进龙虾空间',
-      action: 'open_view',
-      payload: { view: 'lobster_space' },
-    },
-    {
-      id: 'ask-unlocks',
-      label: '解锁了什么',
-      action: 'send_message',
-      payload: { content: '今天解锁了什么？' },
-    },
-  ]
-}
-
 function createDiarySuggestions(): LobsterSuggestion[] {
   return [
     {
@@ -1462,25 +2108,132 @@ function hasMusicProfile(profiles: InterestProfile[]) {
 }
 
 function createMusicAuthorizationLine(
-  status: 'pending' | 'authorized' | 'declined' = 'pending',
+  status: 'pending' | 'loading' | 'authorized' | 'declined' = 'pending',
 ): LobsterChatLine {
   const content =
     status === 'authorized'
-      ? '模拟 QQ 音乐已经授权。我会只用这组 Demo 数据生成音乐提醒，并把来源写清楚。'
+      ? '模拟 QQ 音乐授权范围已经确认。'
       : status === 'declined'
         ? '没问题，我先只记住你选择了音乐兴趣，不会说出具体歌手、新歌或演出提醒。'
-        : '我看到你选了音乐兴趣。如果你愿意授权 QQ 音乐，我可以更准确地记住你喜欢的歌手、新歌和演出提醒。'
+        : status === 'loading'
+          ? '小钳正在确认授权范围，会先整理成一条音乐记忆。'
+          : '我看到你选了音乐兴趣。如果你愿意授权 QQ 音乐，我可以更准确地记住你喜欢的歌手、新歌和演出提醒。'
 
   return {
     id: `music-authorization-${Date.now()}`,
     role: 'lobster',
     content,
     createdAt: new Date().toISOString(),
-    status: status === 'pending' ? 'actionable' : 'complete',
+    status:
+      status === 'pending'
+        ? 'actionable'
+        : status === 'loading'
+          ? 'generating'
+          : 'complete',
     source: 'mock-fallback',
     card: {
       type: 'music_authorization_card',
       status,
+    },
+  }
+}
+
+function updateLatestMusicAuthorizationLineStatus(
+  lines: LobsterChatLine[],
+  status: 'pending' | 'loading' | 'authorized' | 'declined',
+) {
+  const replacement = createMusicAuthorizationLine(status)
+  let targetIndex = -1
+
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (lines[index]?.card?.type === 'music_authorization_card') {
+      targetIndex = index
+      break
+    }
+  }
+
+  if (targetIndex === -1) {
+    return [...lines, replacement]
+  }
+
+  return lines.map((line, index) =>
+    index === targetIndex
+      ? {
+          ...line,
+          content: replacement.content,
+          status: replacement.status,
+          source: replacement.source,
+          card: replacement.card,
+          suggestions: undefined,
+        }
+      : line,
+  )
+}
+
+function replaceLatestMusicAuthorizationLine(
+  lines: LobsterChatLine[],
+  replacement: LobsterChatLine,
+) {
+  let targetIndex = -1
+
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    if (lines[index]?.card?.type === 'music_authorization_card') {
+      targetIndex = index
+      break
+    }
+  }
+
+  if (targetIndex === -1) {
+    return [...lines, replacement]
+  }
+
+  return lines.map((line, index) => (index === targetIndex ? replacement : line))
+}
+
+const musicSkillSuggestionItems = [
+  '歌手动态雷达',
+  '新歌 / 专辑提醒',
+  '同城演出提醒',
+  '音乐聊天记忆',
+]
+
+const musicSkillInstallationSteps = [
+  '正在安装歌手动态雷达...',
+  '正在设置重要提醒频率...',
+  '正在把音乐技能挂到小钳的小背包里...',
+]
+
+const musicSkillInstalledMessage = [
+  '装好啦。',
+  '以后我会陪你一起关注喜欢的歌手、新歌和演出动态。',
+  '重要的我会轻轻提醒，不重要的就先夹在记录里，不吵你。',
+  '',
+  '你可以继续和我聊音乐，也可以让我展示刚装好的提醒能力。',
+].join('\n')
+
+function createMusicSkillSuggestionLine(profile: InterestProfile): LobsterChatLine {
+  const topic = profile.topics[0] ?? '林俊杰'
+
+  return {
+    id: `music-resonance-${Date.now()}`,
+    role: 'lobster',
+    content: [
+      `我看到你常听${topic}。`,
+      '他的歌很会把情绪收住，不是一下子冲出来，而是慢慢把人带进去。',
+      '我感觉你应该不是只听旋律的人，也会在意歌里的陪伴感。',
+      '',
+      '我可以安装几个音乐小技能，以后陪你一起关注这些动态。',
+    ].join('\n'),
+    createdAt: new Date().toISOString(),
+    status: 'complete',
+    source: 'mock-fallback',
+    card: {
+      type: 'music_skill_suggestion_card',
+      title: '音乐小技能建议',
+      summary: '授权已经确认，我可以把这些能力装进小钳的小背包里。',
+      skills: musicSkillSuggestionItems,
+      status: 'idle',
+      steps: musicSkillInstallationSteps,
     },
   }
 }
@@ -1506,6 +2259,17 @@ function createInterestMemoryLine(
   }
 }
 
+function appendInterestReceiptToLineContent(content: string, receipt: string) {
+  const normalizedReceipt = receipt.trim()
+  if (!normalizedReceipt || content.includes(normalizedReceipt)) {
+    return content
+  }
+
+  return content.trim()
+    ? `${content.trim()}\n\n${normalizedReceipt}`
+    : normalizedReceipt
+}
+
 function createInterestRiskLine(input: {
   reason: string
   evidenceText: string
@@ -1523,35 +2287,6 @@ function createInterestRiskLine(input: {
       reason: input.reason,
       evidenceText: input.evidenceText,
     },
-  }
-}
-
-function createMusicNarrativeCard(profile?: InterestProfile): InterestNarrativeCard {
-  return {
-    id: `interest-narrative-music-${Date.now()}`,
-    type: 'interest_reminder',
-    interest: 'music',
-    narrative:
-      '我刚看到一条和林俊杰有关的深圳演出更新，感觉你可能会在意。因为你授权了模拟 QQ 音乐数据，兴趣记忆里也有林俊杰和深圳，所以我把它夹出来给你看。Demo 数据是模拟的，不代表真实票务信息。',
-    title: '你关注的歌手有新动态',
-    summary: '林俊杰深圳演出信息有更新。',
-    reason: '你在兴趣记忆里关注了林俊杰，并把城市设为深圳。',
-    sourceLabel: '模拟 QQ 音乐授权数据',
-    sourceType: 'qq_music',
-    riskNote: 'Demo 使用模拟数据，不代表真实票务信息。',
-    sourceDetail:
-      profile?.sources.find((source) => source.type === 'qq_music')?.evidenceText ??
-      '用户在 Demo 中确认授权模拟 QQ 音乐，并表达过关注林俊杰、周杰伦和日摇。',
-    actions: [
-      {
-        id: 'view_source',
-        label: '查看来源',
-      },
-      {
-        id: 'generate_space_post',
-        label: '生成龙虾空间动态',
-      },
-    ],
   }
 }
 
@@ -1613,8 +2348,8 @@ function createInterestNarrativeLine(
   }
 }
 
-function createInterestSpacePreviewLine(profile?: InterestProfile): LobsterChatLine {
-  return createInterestNarrativeLine(createMusicNarrativeCard(profile), [
+function createMusicReminderSuggestions(): LobsterSuggestion[] {
+  return [
     {
       id: 'interest-source',
       label: '看来源',
@@ -1622,18 +2357,18 @@ function createInterestSpacePreviewLine(profile?: InterestProfile): LobsterChatL
       payload: { content: '为什么提醒我？' },
     },
     {
+      id: 'interest-space-preview',
+      label: '生成空间动态',
+      action: 'run_capability',
+      payload: { capability: 'interest_space_preview' },
+    },
+    {
       id: 'interest-memory',
       label: '兴趣记忆',
       action: 'run_capability',
       payload: { capability: 'interest_memory' },
     },
-    {
-      id: 'keep-chatting',
-      label: '继续聊',
-      action: 'send_message',
-      payload: { content: '我们继续聊聊音乐。' },
-    },
-  ])
+  ]
 }
 
 function createBadmintonCommunityLine(): LobsterChatLine {
@@ -1771,7 +2506,7 @@ function extractLocalInterestUpdate(content: string):
         mutedTopics: [],
         updatedAt: now,
       },
-      receipt: `已记住一点音乐偏好：${musicTopics.join('、')}。`,
+      receipt: `我记住了，队长喜欢${musicTopics.join('、')}。`,
     }
   }
 
@@ -1805,11 +2540,84 @@ function extractLocalInterestUpdate(content: string):
         mutedTopics: [],
         updatedAt: now,
       },
-      receipt: `已记住一点羽毛球偏好：${normalizedTopics.join('、')}。`,
+      receipt: `我记住了，队长喜欢${normalizedTopics.join('、')}。`,
     }
   }
 
   return null
+}
+
+function parseInterestEditInput(content: string, existing: InterestProfile) {
+  const text = content.trim()
+  const parts = text
+    .replace(/[，。；、]/g, ' ')
+    .split(/\s+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+  const knownMusicTopics = [
+    '林俊杰',
+    '周杰伦',
+    '日摇',
+    '摇滚',
+    '民谣',
+    '电子',
+    '演唱会',
+    '新歌',
+    '专辑',
+  ]
+  const knownBadmintonTopics = [
+    '羽毛球',
+    '固定搭子',
+    '周末约球',
+    '新手友好',
+    '工作日晚场',
+  ]
+  const candidates =
+    existing.interest === 'music' ? knownMusicTopics : knownBadmintonTopics
+  const matchedTopics = candidates.filter((topic) => text.includes(topic))
+  const freeformTopics = parts.filter(
+    (item) =>
+      item.length <= 12 &&
+      !['我想', '希望', '改成', '修改', '只提醒', '城市'].some((word) =>
+        item.includes(word),
+      ),
+  )
+  const topics = Array.from(
+    new Set(matchedTopics.length > 0 ? matchedTopics : freeformTopics),
+  ).slice(0, 6)
+  const cityMatch = text.match(
+    /(?:城市|在|定位到|地区)[:：]?\s*([\u4e00-\u9fa5A-Za-z]{2,12})/,
+  )
+
+  return {
+    topics: topics.length > 0 ? topics : existing.topics,
+    city: cityMatch?.[1] ?? existing.city,
+    evidenceText: text,
+  }
+}
+
+function createEditedInterestProfile(
+  existing: InterestProfile,
+  content: string,
+): InterestProfile {
+  const parsed = parseInterestEditInput(content, existing)
+  return {
+    ...existing,
+    topics: parsed.topics,
+    city: parsed.city,
+    sources: [
+      ...existing.sources,
+      {
+        id: `source-user-edit-${Date.now()}`,
+        type: 'user_setting',
+        title: '你在聊天里修改了兴趣记忆',
+        authorized: false,
+        permissionNote: '用户通过聊天输入修改内容，可随时再次修改或删除。',
+        evidenceText: parsed.evidenceText,
+      },
+    ],
+    updatedAt: new Date().toISOString(),
+  }
 }
 
 function mergeInterestProfile(
@@ -1863,7 +2671,9 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
   lobsterChatLines: [],
   lobsterChatBusy: false,
   interestProfiles: [],
+  pendingInterestEdit: null,
   communityFavoriteCount: 0,
+  demoRuntimeState: createInitialDemoRuntimeState(),
   musicAuthorizationStatus: defaultLobsterProfile.interests.includes('music')
     ? 'pending'
     : 'not_selected',
@@ -1873,10 +2683,18 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
   adoptionDraft: initialAdoptionDraft,
 
   setActiveConversation: (conversationId) => {
-    set({
+    set((state) => ({
       appView: 'qq',
       activeConversationId: conversationId,
-    })
+      demoRuntimeState:
+        state.appView === 'lobster_chat'
+          ? {
+              ...applyDemoEvent(state, { type: 'view.left_lobster_chat' }),
+              pendingSpaceReplyCount: 0,
+            }
+          : state.demoRuntimeState,
+    }))
+    scheduleOffChatPushEvaluation(get(), () => get().evaluateOffChatPushes())
   },
 
   discoverLobster: () => {
@@ -1887,23 +2705,55 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
   },
 
   openAdoption: () => {
-    set({
+    set((state) => ({
       appView: 'adoption',
       lobsterDiscovered: true,
-    })
+      demoRuntimeState:
+        state.appView === 'lobster_chat'
+          ? {
+              ...applyDemoEvent(state, { type: 'view.left_lobster_chat' }),
+              pendingSpaceReplyCount: 0,
+            }
+          : state.demoRuntimeState,
+    }))
+    scheduleOffChatPushEvaluation(get(), () => get().evaluateOffChatPushes())
   },
 
   closeAdoption: () => {
-    set((state) => ({
-      appView: state.lobsterAdopted ? 'lobster_chat' : 'qq',
-    }))
+    set((state) => {
+      const appView = state.lobsterAdopted ? 'lobster_chat' : 'qq'
+
+      return {
+        appView,
+        demoRuntimeState:
+          appView === 'lobster_chat'
+            ? applyDemoEvent(state, { type: 'view.entered_lobster_chat' })
+            : state.demoRuntimeState,
+      }
+    })
+    if (get().appView === 'lobster_chat') {
+      clearOffChatPushCheck()
+    } else {
+      scheduleOffChatPushEvaluation(get(), () => get().evaluateOffChatPushes())
+    }
   },
 
   openLobsterChat: () => {
-    set((state) => ({
-      appView: state.lobsterAdopted ? 'lobster_chat' : 'adoption',
-      lobsterDiscovered: true,
-    }))
+    set((state) => {
+      const appView = state.lobsterAdopted ? 'lobster_chat' : 'adoption'
+
+      return {
+        appView,
+        lobsterDiscovered: true,
+        demoRuntimeState:
+          appView === 'lobster_chat'
+            ? applyDemoEvent(state, { type: 'view.entered_lobster_chat' })
+            : state.demoRuntimeState,
+      }
+    })
+    if (get().appView === 'lobster_chat') {
+      clearOffChatPushCheck()
+    }
   },
 
   updateAdoptionDraft: (patch) => {
@@ -1931,9 +2781,84 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
     })
   },
 
+  resetDemoRuntimeState: () => {
+    clearOffChatPushCheck()
+    set({
+      demoRuntimeState: createInitialDemoRuntimeState(),
+    })
+  },
+
+  evaluateDemoTriggers: (event) => {
+    set((state) => ({
+      demoRuntimeState: applyDemoAchievementThresholds({
+        completedCheckInIds: state.completedCheckInIds,
+        demoRuntimeState: applyDemoEvent(state, event),
+      }),
+    }))
+
+    if (event.type === 'view.entered_lobster_chat') {
+      clearOffChatPushCheck()
+    } else if (event.type === 'view.left_lobster_chat') {
+      scheduleOffChatPushEvaluation(get(), () => get().evaluateOffChatPushes())
+    }
+
+    if (getLocalDiaryEligibility(get().completedCheckInIds).canPrewarm) {
+      void get().triggerHiddenDiary()
+    }
+  },
+
+  evaluateOffChatPushes: () => {
+    const current = get()
+
+    if (current.appView === 'lobster_chat' || !current.demoRuntimeState.leftChatAt) {
+      clearOffChatPushCheck()
+      return
+    }
+
+    const elapsedMs = getOffChatElapsedMs(current.demoRuntimeState.leftChatAt)
+    if (elapsedMs < offChatPushDelayMs) {
+      scheduleOffChatPushCheck(
+        () => get().evaluateOffChatPushes(),
+        offChatPushDelayMs - elapsedMs,
+      )
+      return
+    }
+
+    const eligibility = getOffChatPushEligibility(current)
+    if (eligibility.canSendMusic) {
+      set((state) => ({
+        demoRuntimeState: {
+          ...state.demoRuntimeState,
+          musicPushSent: true,
+          behaviorPushSent:
+            state.demoRuntimeState.behaviorPushSent ||
+            getCompletedDemoAchievementCount(state.completedCheckInIds) >=
+              behaviorPushAchievementThreshold,
+        },
+        lobsterChatLines: [
+          ...state.lobsterChatLines,
+          createOffChatMusicPushLine(state),
+        ],
+      }))
+      return
+    }
+
+    if (eligibility.canSendBehavior) {
+      set((state) => ({
+        demoRuntimeState: {
+          ...state.demoRuntimeState,
+          behaviorPushSent: true,
+        },
+        lobsterChatLines: [
+          ...state.lobsterChatLines,
+          createOffChatBehaviorPushLine(state),
+        ],
+      }))
+    }
+  },
+
   completeAdoption: () => {
     let adoptionPayload: AdoptionDraft | null = null
-    let shouldCompleteCommunityCardRemote = false
 
     set((state) => {
       const lobsterProfile: LobsterProfile = {
@@ -1956,59 +2881,32 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
         personality: lobsterProfile.personality,
         interests: lobsterProfile.interests,
       }
-      const shouldRequestMusicAuthorization =
-        lobsterProfile.interests.includes('music') &&
-        !hasMusicProfile(state.interestProfiles)
-      const shouldShowBadmintonCommunity =
-        lobsterProfile.interests.includes('badminton') &&
-        !state.lobsterChatLines.some(
-          (line) => line.card?.type === 'interest_community',
-        )
-      const shouldCompleteCommunityCard =
-        shouldShowBadmintonCommunity &&
-        !state.completedCheckInIds.includes('first_community_card')
-      shouldCompleteCommunityCardRemote = shouldCompleteCommunityCard
-
-        return {
-          lobsterAdopted: true,
-          lobsterDiscovered: true,
-          musicAuthorizationStatus: lobsterProfile.interests.includes('music')
-            ? hasMusicProfile(state.interestProfiles)
-              ? 'authorized'
-              : 'pending'
-            : 'not_selected',
-          lobsterProfile,
-          completedCheckInIds: shouldCompleteCommunityCard
-            ? withCheckIn(state.completedCheckInIds, 'first_community_card')
-            : state.completedCheckInIds,
-          currentCheckInId: 'first_lobster_chat',
-          achievementMomentQueue: shouldCompleteCommunityCard
-            ? enqueueAchievementMomentForUnlock(state, 'first_community_card')
-            : state.achievementMomentQueue,
-          lobsterChatLines: [
-            ...state.lobsterChatLines,
-            ...(shouldRequestMusicAuthorization
-              ? [createMusicAuthorizationLine('pending')]
-              : []),
-            ...(shouldShowBadmintonCommunity
-              ? [
-                  createInterestNarrativeLine(
-                    createBadmintonCommunityNarrativeCard(),
-                  ),
-                ]
-              : []),
-          ],
-        }
+      return {
+        lobsterAdopted: true,
+        lobsterDiscovered: true,
+        demoRuntimeState: {
+          ...createInitialDemoRuntimeState(),
+          introPromptShown: true,
+        },
+        musicAuthorizationStatus: lobsterProfile.interests.includes('music')
+          ? hasMusicProfile(state.interestProfiles)
+            ? 'authorized'
+            : 'pending'
+          : 'not_selected',
+        lobsterProfile,
+        completedCheckInIds: state.completedCheckInIds,
+        currentCheckInId: 'first_lobster_chat',
+        achievementMomentQueue: state.achievementMomentQueue,
+        lobsterChatLines: [
+          ...state.lobsterChatLines,
+          createAdoptionGreetingLine(lobsterProfile),
+        ],
+      }
       })
 
     const savedAdoptionPayload = adoptionPayload
     if (savedAdoptionPayload) {
       void openclawClient.saveAdoption(savedAdoptionPayload).catch(() => undefined)
-    }
-    if (shouldCompleteCommunityCardRemote) {
-      void openclawClient
-        .completeCheckIn('first_community_card')
-        .catch(() => undefined)
     }
   },
 
@@ -2016,8 +2914,19 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
     set((state) => {
       const alreadyDone = state.completedCheckInIds.includes(checkInId)
       const completedCheckInIds = withCheckIn(state.completedCheckInIds, checkInId)
+      const demoRuntimeState = alreadyDone
+        ? state.demoRuntimeState
+        : applyDemoEvent(
+            { ...state, completedCheckInIds },
+            { type: 'achievement.unlocked', checkInId },
+          )
+
       return {
         completedCheckInIds,
+        demoRuntimeState: applyDemoAchievementThresholds({
+          completedCheckInIds,
+          demoRuntimeState,
+        }),
         currentCheckInId: getNextCheckInId(checkInId) ?? state.currentCheckInId,
         achievementMomentQueue: alreadyDone
           ? state.achievementMomentQueue
@@ -2034,6 +2943,13 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
             ),
       }
     })
+
+    if (getLocalDiaryEligibility(get().completedCheckInIds).canPrewarm) {
+      void get().triggerHiddenDiary()
+    }
+    if (get().demoRuntimeState.leftChatAt) {
+      scheduleOffChatPushEvaluation(get(), () => get().evaluateOffChatPushes())
+    }
 
     void openclawClient
       .completeCheckIn(checkInId)
@@ -2070,40 +2986,45 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       })
   },
 
-  requestGroupPermissions: () => {
+  requestGroupPermissions: (targetLineId) => {
     set((state) => ({
       lobsterChatLines: (() => {
         const groupOptions = getPermissionGroupOptions()
         const fallbackGroupId = groupOptions[0]?.id ?? getPrimaryGroupId()
-        const groupIds =
+        const groupIds = (
           state.authorizedGroupIds.length > 0
             ? state.authorizedGroupIds
             : [state.activeGuideGroupId || fallbackGroupId]
+        ).slice(0, maxDemoSummaryGroups)
         const groupId = groupIds[0] ?? fallbackGroupId
         const groupTitle = getGroupTitle(groupId)
 
-        return [
-          ...state.lobsterChatLines,
-          {
+        const permissionLine = {
           id: `permission-request-${Date.now()}`,
           role: 'lobster',
           content:
-              '要整理群聊，我需要先知道你愿意让我看哪些群。选好后，我会把这些群放进同一张总结卡里。',
-            createdAt: new Date().toISOString(),
-            status: 'actionable',
-            source: 'mock-fallback',
-            card: {
-              type: 'permission_request',
-              groupId,
-              groupTitle,
-              selectedGroupIds: groupIds,
-              groupOptions,
-              permissions:
-                state.permissionScopes.find((scope) => scope.groupId === groupId) ??
-                createDefaultPermissions(groupId),
-    },
-  },
-        ]
+            '要整理群聊，我需要先知道你愿意让我看哪些群，也要定一个每天总结的时间。最多选 3 个群；选好后，我会先生成一次总结给你看。',
+          createdAt: new Date().toISOString(),
+          status: 'actionable',
+          source: 'mock-fallback',
+          card: {
+            type: 'permission_request',
+            groupId,
+            groupTitle,
+            selectedGroupIds: groupIds,
+            groupOptions,
+            permissions:
+              state.permissionScopes.find((scope) => scope.groupId === groupId) ??
+              createDefaultPermissions(groupId),
+          },
+        } satisfies LobsterChatLine
+
+        return targetLineId
+          ? updateChatLine(state.lobsterChatLines, targetLineId, {
+              ...permissionLine,
+              id: targetLineId,
+            })
+          : [...state.lobsterChatLines, permissionLine]
       })(),
     }))
   },
@@ -2118,7 +3039,7 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
           : [permissions.groupId]
         ).filter((groupId) => allowedGroupIds.has(groupId)),
       ),
-    )
+    ).slice(0, maxDemoSummaryGroups)
     const groupIds =
       normalizedGroupIds.length > 0 ? normalizedGroupIds : [permissions.groupId]
     const timestamp = new Date().toISOString()
@@ -2128,6 +3049,8 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
         ...permissions,
         groupId,
         diaryMaterial: false,
+        summaryScheduleTime:
+          permissions.summaryScheduleTime ?? defaultSummaryScheduleTime,
         updatedAt: timestamp,
       }
       scope.collectMentions = scope.summarizeGroup
@@ -2175,7 +3098,9 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       )
       const latest = results.at(-1)
       set((state) => ({
-        permissionScopes: latest?.permissions ?? state.permissionScopes,
+        permissionScopes: latest?.permissions
+          ? upsertPermissionScopes(latest.permissions, scopesToSave)
+          : state.permissionScopes,
         activeGuideGroupId: primaryScope?.groupId ?? state.activeGuideGroupId,
       }))
     } catch {
@@ -2195,7 +3120,7 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
   },
 
   openSummarySource: (message) => {
-    set({
+    set((state) => ({
       appView: 'qq',
       activeConversationId: message.conversationId,
       sourceFocus: {
@@ -2203,7 +3128,18 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
         messageId: message.id,
         nonce: Date.now(),
       },
-    })
+      demoRuntimeState:
+        state.appView === 'lobster_chat'
+          ? {
+              ...applyDemoEvent(state, { type: 'view.left_lobster_chat' }),
+              pendingSpaceReplyCount: 0,
+            }
+          : {
+              ...state.demoRuntimeState,
+              pendingSpaceReplyCount: 0,
+            },
+    }))
+    scheduleOffChatPushEvaluation(get(), () => get().evaluateOffChatPushes())
   },
 
   summarizeAuthorizedGroup: async (targetGroupId) => {
@@ -2213,12 +3149,13 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
   },
 
   summarizeAuthorizedGroups: async (targetGroupIds) => {
-    const groupIds =
+    const groupIds = (
       targetGroupIds && targetGroupIds.length > 0
         ? targetGroupIds
         : get().authorizedGroupIds.length > 0
           ? get().authorizedGroupIds
           : [get().activeGuideGroupId]
+    ).slice(0, maxDemoSummaryGroups)
     const allowedGroupIds = groupIds.filter((groupId) =>
       hasGroupPermission(get().permissionScopes, groupId, 'summarizeGroup'),
     )
@@ -2236,6 +3173,11 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       return
     }
 
+    const scheduleTime =
+      get().permissionScopes.find(
+        (scope) =>
+          allowedGroupIds.includes(scope.groupId) && scope.summaryScheduleTime,
+      )?.summaryScheduleTime ?? defaultSummaryScheduleTime
     const lineId = `summary-${Date.now()}`
     set((state) => ({
       lobsterChatBusy: true,
@@ -2244,7 +3186,7 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
         {
           id: lineId,
           role: 'lobster',
-          content: '我开始整理这些授权群里的重点，稍后会合成一张可切换的群聊总结卡。',
+          content: `我会按每天 ${scheduleTime} 的节奏总结这些授权群；这次先为 Demo 生成一张可切换的群聊总结卡。`,
           createdAt: new Date().toISOString(),
           status: 'generating',
           source: 'mock-fallback',
@@ -2300,7 +3242,7 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
     set((state) => ({
       lobsterChatBusy: false,
       lobsterChatLines: updateChatLine(state.lobsterChatLines, lineId, {
-        content: `我把 ${groups.length} 个群的重点放进同一张群聊总结卡里了。`,
+        content: `我把 ${groups.length} 个群的重点放进同一张群聊总结卡里了，以后会按每天 ${scheduleTime} 提醒一次。`,
         status: 'complete',
         source: groups.some((group) => group.source === 'real-ai')
           ? 'real-ai'
@@ -2343,7 +3285,7 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
     )
   },
 
-  requestReplyDraft: async (targetGroupId, targetSourceMessageId) => {
+  requestReplyDraft: async (targetGroupId, targetSourceMessageId, targetLineId) => {
     const latestSummaryGroup = getLatestSummaryGroup(
       get().lobsterChatLines,
       targetGroupId,
@@ -2371,20 +3313,28 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
     }
 
     const lineId = `reply-draft-${Date.now()}`
-    set((state) => ({
-      lobsterChatBusy: true,
-      lobsterChatLines: [
-        ...state.lobsterChatLines,
-        {
-          id: lineId,
-          role: 'lobster',
-          content: '我先写一条可复制的回复草稿，等你跳回群聊后自己决定怎么用。',
-          createdAt: new Date().toISOString(),
-          status: 'generating',
-          source: 'mock-fallback',
-        },
-      ],
-    }))
+    const activeLineId = targetLineId ?? lineId
+    if (!targetLineId) {
+      set((state) => ({
+        lobsterChatBusy: true,
+        lobsterChatLines: [
+          ...state.lobsterChatLines,
+          {
+            id: lineId,
+            role: 'lobster',
+            content: '',
+            createdAt: new Date().toISOString(),
+            status: 'generating',
+            source: 'mock-fallback',
+          },
+        ],
+      }))
+      await streamLocalLineContent(
+        activeLineId,
+        '我先写一条可复制的回复草稿，等你跳回群聊后自己决定怎么用。',
+        set,
+      )
+    }
 
     let draft =
       '我先确认一下 Demo 路径：第一屏保持 QQ 群聊里的自然出现感，不做独立工具首页。整理完后我再发到群里。'
@@ -2407,8 +3357,8 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
 
     set((state) => ({
       lobsterChatBusy: false,
-      lobsterChatLines: updateChatLine(state.lobsterChatLines, lineId, {
-        content: '回复草稿写好了。你可以跳回群聊后粘贴使用。',
+      lobsterChatLines: updateChatLine(state.lobsterChatLines, activeLineId, {
+        content: `${state.lobsterChatLines.find((line) => line.id === activeLineId)?.content ?? ''}\n\n回复草稿写好了。你可以跳回群聊后粘贴使用。`.trim(),
         status: 'complete',
         source: cardSource === 'real-ai' ? 'real-ai' : 'mock-fallback',
         outputId,
@@ -2433,7 +3383,7 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
     void recordLocalSpaceAwarenessEvent(
       {
         type: 'reply_draft_created',
-        sourceId: outputId ?? sourceMessage?.id ?? lineId,
+        sourceId: outputId ?? sourceMessage?.id ?? activeLineId,
         outputId,
         groupId,
         groupTitle,
@@ -2444,25 +3394,32 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       set,
       get,
     )
-    void get().triggerHiddenDiary()
   },
 
-  generateWorkLog: async () => {
+  generateWorkLog: async (targetLineId) => {
     const lineId = `work-log-${Date.now()}`
-    set((state) => ({
-      lobsterChatBusy: true,
-      lobsterChatLines: [
-        ...state.lobsterChatLines,
-        {
-          id: lineId,
-          role: 'lobster',
-          content: '我把刚才做过的事拉成一条可追问的工作记录。',
-          createdAt: new Date().toISOString(),
-          status: 'generating',
-          source: 'mock-fallback',
-        },
-      ],
-    }))
+    const activeLineId = targetLineId ?? lineId
+    if (!targetLineId) {
+      set((state) => ({
+        lobsterChatBusy: true,
+        lobsterChatLines: [
+          ...state.lobsterChatLines,
+          {
+            id: lineId,
+            role: 'lobster',
+            content: '',
+            createdAt: new Date().toISOString(),
+            status: 'generating',
+            source: 'mock-fallback',
+          },
+        ],
+      }))
+      await streamLocalLineContent(
+        activeLineId,
+        '我把刚才做过的事拉成一条可追问的工作记录。',
+        set,
+      )
+    }
 
     let text =
       '工作记录（本地 fallback）：我读取了授权群消息，生成群聊总结卡，保留来源消息，并写了一条可复制到群里的回复草稿。'
@@ -2491,8 +3448,8 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
 
     set((state) => ({
       lobsterChatBusy: false,
-      lobsterChatLines: updateChatLine(state.lobsterChatLines, lineId, {
-        content: '工作记录已经整理好，后面你可以继续问我今天做过什么。',
+      lobsterChatLines: updateChatLine(state.lobsterChatLines, activeLineId, {
+        content: `${state.lobsterChatLines.find((line) => line.id === activeLineId)?.content ?? ''}\n\n工作记录已经整理好，后面你可以继续问我今天做过什么。`.trim(),
         status: 'complete',
         source: cardSource === 'real-ai' ? 'real-ai' : 'mock-fallback',
         outputId,
@@ -2513,7 +3470,7 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
     void recordLocalSpaceAwarenessEvent(
       {
         type: 'work_log_created',
-        sourceId: workLogId ?? outputId ?? lineId,
+        sourceId: workLogId ?? outputId ?? activeLineId,
         outputId,
         workLogId,
         title: '工作记录',
@@ -2533,19 +3490,20 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
     try {
       const state = await openclawClient.hiddenDiaryState()
       if (state.entry) {
+        const entries = normalizeDiaryEntries(state.entries)
         set({
           diaryTriggered: true,
-          diarySurpriseVisible: !state.revealed && Boolean(state.entry.image),
+          diarySurpriseVisible: false,
           diaryUnlocked: state.unlocked && state.revealed,
-          diaryEntries: state.entries,
+          diaryEntries: entries,
         })
-        if (!state.revealed && !state.entry.image) {
+        if (!state.revealed && !entries[0]?.image) {
           void get().generateHiddenDiaryImage()
         }
         return
       }
 
-      if (!state.canTrigger) {
+      if (!state.canTrigger && !canPrewarmLocalDiary(get())) {
         return
       }
 
@@ -2557,12 +3515,14 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
         diaryTriggered: true,
         diarySurpriseVisible: false,
         diaryUnlocked: false,
-        diaryEntries: output.entries.length > 0 ? output.entries : [output],
+        diaryEntries: normalizeDiaryEntries(
+          output.entries.length > 0 ? output.entries : [output],
+        ),
       })
       void get().generateHiddenDiaryImage()
     } catch {
       const fallbackState = get()
-      if (!canTriggerLocalDiary(fallbackState)) {
+      if (!canPrewarmLocalDiary(fallbackState)) {
         return
       }
 
@@ -2592,19 +3552,25 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
 
     try {
       const state = await openclawClient.revealHiddenDiary()
-      revealedEntry = state.entry ?? revealedEntry
+      revealedEntry = state.entry
+        ? normalizeDiaryEntryImage(state.entry)
+        : revealedEntry
     } catch {
       // Local fallback diaries are revealed only in the in-memory demo state.
     }
 
     set((state) => ({
       appView: 'lobster_chat',
+      demoRuntimeState: applyDemoEvent(state, {
+        type: 'view.entered_lobster_chat',
+      }),
       diaryTriggered: true,
       diarySurpriseVisible: false,
       diaryUnlocked: true,
       diaryEntries: [revealedEntry, ...state.diaryEntries.slice(1)],
       lobsterChatLines: [...state.lobsterChatLines, createDiaryLine(revealedEntry)],
     }))
+    clearOffChatPushCheck()
 
     void recordLocalSpaceAwarenessEvent(
       {
@@ -2627,9 +3593,9 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
 
     try {
       const output = await openclawClient.generateDiaryImage()
-      const updatedEntry = output.entry
+      const updatedEntry = normalizeDiaryEntryImage(output.entry)
       set((state) => ({
-        diarySurpriseVisible: !updatedEntry.revealedAt,
+        diarySurpriseVisible: false,
         diaryEntries: replaceDiaryEntry(state.diaryEntries, updatedEntry),
         lobsterChatLines: replaceDiaryCards(
           state.lobsterChatLines,
@@ -2647,7 +3613,15 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
         get,
       )
     } catch {
-      // Image generation keeps the text diary usable when the provider is down.
+      const fallbackEntry = withFallbackDiaryImage(entry)
+      set((state) => ({
+        diarySurpriseVisible: false,
+        diaryEntries: replaceDiaryEntry(state.diaryEntries, fallbackEntry),
+        lobsterChatLines: replaceDiaryCards(
+          state.lobsterChatLines,
+          fallbackEntry,
+        ),
+      }))
     }
   },
 
@@ -2675,9 +3649,20 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       )
       set({
         appView: 'lobster_space',
+        demoRuntimeState:
+          current.appView === 'lobster_chat'
+            ? {
+                ...applyDemoEvent(current, { type: 'view.left_lobster_chat' }),
+                pendingSpaceReplyCount: 0,
+              }
+            : {
+                ...current.demoRuntimeState,
+                pendingSpaceReplyCount: 0,
+              },
         spacePosts: posts,
         spaceUnlocked: posts.length > 0,
       })
+      scheduleOffChatPushEvaluation(get(), () => get().evaluateOffChatPushes())
     } catch {
       const current = get()
       const publishedPosts = getPublishedSpacePostsFromChatLines(
@@ -2688,43 +3673,84 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
           ? mergeSpacePosts(current.spacePosts, publishedPosts)
           : publishedPosts.length > 0
             ? publishedPosts
-            : [
-                createLocalSpacePost(
-                  current.lobsterProfile,
-                  current.diaryEntries[0],
-                ),
-              ]
+            : []
       set({
         appView: 'lobster_space',
+        demoRuntimeState:
+          current.appView === 'lobster_chat'
+            ? {
+                ...applyDemoEvent(current, { type: 'view.left_lobster_chat' }),
+                pendingSpaceReplyCount: 0,
+              }
+            : {
+                ...current.demoRuntimeState,
+                pendingSpaceReplyCount: 0,
+              },
         spacePosts: localPosts,
-        spaceUnlocked: true,
+        spaceUnlocked: localPosts.length > 0,
       })
+      scheduleOffChatPushEvaluation(get(), () => get().evaluateOffChatPushes())
     }
   },
 
-  showMusicInterestReminder: async () => {
+  showMusicInterestReminder: async (targetLineId) => {
     const current = get()
     const profile = current.interestProfiles.find(
       (item) => item.interest === 'music',
     )
     if (!profile) {
+      const authorizationLine = createMusicAuthorizationLine('pending')
       set((state) => ({
         musicAuthorizationStatus: state.lobsterProfile.interests.includes('music')
           ? 'pending'
           : state.musicAuthorizationStatus,
-        lobsterChatLines: [
-          ...state.lobsterChatLines,
-          createMusicAuthorizationLine('pending'),
-        ],
+        lobsterChatBusy: false,
+        lobsterChatLines: targetLineId
+          ? updateChatLine(state.lobsterChatLines, targetLineId, {
+              status: authorizationLine.status,
+              source: authorizationLine.source,
+              card: authorizationLine.card,
+              suggestions: authorizationLine.suggestions,
+            })
+          : [...state.lobsterChatLines, authorizationLine],
       }))
       return
     }
 
-    let line = createInterestSpacePreviewLine(profile)
+    let line: LobsterChatLine = {
+      id: `interest-narrative-music-${Date.now()}-line`,
+      role: 'lobster',
+      content: '',
+      createdAt: new Date().toISOString(),
+      status: 'complete',
+      source: 'mock-fallback',
+      suggestions: createMusicReminderSuggestions(),
+    }
     let profiles: InterestProfile[] | null = null
+    const aiOutput = await openclawAiAdapter.chatWithLobster({
+      content:
+        '请基于用户授权的 QQ 音乐兴趣，用同好聊天口吻讲一条最近音乐动态。要具体、有来源边界，不要生成后续信息卡，也不要说得像广告。',
+      lobsterProfile: current.lobsterProfile,
+      context: createPrivateChatContext(
+        current,
+        '小钳，给我讲讲最近的音乐动态',
+      ),
+    })
+    line = {
+      ...line,
+      content: aiOutput.text,
+      source: aiOutput.source,
+      outputId: aiOutput.id,
+    }
     try {
       const result = await openclawClient.generateInterestReminder('music')
-      line = createInterestNarrativeLine(result.card, line.suggestions)
+      line = {
+        ...line,
+        card: {
+          ...result.card,
+          narrative: aiOutput.text,
+        },
+      }
       profiles = result.profiles
     } catch {
       profiles = null
@@ -2733,27 +3759,57 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
     const shouldCompleteMusicSignal = !get().completedCheckInIds.includes(
       'first_music_signal',
     )
-    set((state) => ({
-      interestProfiles: profiles ?? state.interestProfiles,
-      lobsterChatLines: [...state.lobsterChatLines, line],
-    }))
+    if (targetLineId) {
+      set((state) => ({
+        interestProfiles: profiles ?? state.interestProfiles,
+      }))
+      await streamLocalLineContent(targetLineId, line.content, set)
+      set((state) => ({
+        lobsterChatBusy: false,
+        lobsterChatLines: updateChatLine(state.lobsterChatLines, targetLineId, {
+          status: line.status,
+          source: line.source,
+          card: line.card,
+          suggestions: line.suggestions,
+        }),
+      }))
+    } else {
+      set((state) => ({
+        interestProfiles: profiles ?? state.interestProfiles,
+        lobsterChatLines: [...state.lobsterChatLines, line],
+      }))
+    }
 
     if (shouldCompleteMusicSignal) {
       get().completeCheckIn('first_music_signal')
     }
   },
 
-  generateInterestSpacePostPreview: async () => {
+  generateInterestSpacePostPreview: async (targetLineId) => {
     const current = get()
     const profile = current.interestProfiles.find(
       (item) => item.interest === 'music',
     )
-    let line = createInterestSpacePostPreviewLine(current.lobsterProfile, profile)
+    let post: LobsterSpacePost | undefined
+    let line = createPublishedInterestSpacePostLine(
+      createLocalSpacePost(current.lobsterProfile, undefined, {
+        type: 'interest_music_signal',
+        sourceId: `local-interest-space-post-${Date.now()}`,
+        interest: 'music',
+        title: '音乐兴趣动态',
+        summary: '基于授权音乐兴趣生成的龙虾空间动态。',
+        content: createInterestMusicSpacePostContent(profile),
+      }),
+      'local-fallback',
+      'music',
+      '模拟 QQ 音乐授权数据',
+      'qq_music',
+    )
     let profiles: InterestProfile[] | null = null
 
     try {
       const result = await openclawClient.generateInterestSpacePostPreview('music')
-      const post = createLocalSpacePost(current.lobsterProfile, undefined, {
+      post = createLocalSpacePost(current.lobsterProfile, undefined, {
         type: 'interest_music_signal',
         sourceId: result.event.id,
         interest: result.preview.interest,
@@ -2762,26 +3818,95 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
         content: result.preview.preview,
       })
       post.sourceWorkLogId = result.event.id
-      line = {
-        ...createSpacePostLine(
-          post,
-          'mock-fallback',
-          true,
-          result.preview.interest,
-          result.preview.sourceLabel,
-          result.preview.sourceType,
-        ),
-        suggestions: line.suggestions,
-      }
+      line = createPublishedInterestSpacePostLine(
+        post,
+        'mock-fallback',
+        result.preview.interest,
+        result.preview.sourceLabel,
+        result.preview.sourceType,
+      )
       profiles = result.profiles
     } catch {
       profiles = null
+      try {
+        const output = await openclawAiAdapter.chatWithLobster({
+          content:
+            '请替小钳写一条龙虾空间兴趣动态。主题是用户授权后的音乐动态，要具体、有同好感，提到来源边界，不要空泛，不要像公告，控制在 80 字以内。',
+          lobsterProfile: current.lobsterProfile,
+          context: createPrivateChatContext(
+            current,
+            '小钳，把音乐动态生成一条空间动态',
+          ),
+        })
+        post = createLocalSpacePost(current.lobsterProfile, undefined, {
+          type: 'interest_music_signal',
+          sourceId: output.id,
+          outputId: output.id,
+          interest: 'music',
+          title: '音乐兴趣动态',
+          summary: output.text,
+          content: output.text,
+        })
+        line = createPublishedInterestSpacePostLine(
+          post,
+          output.source,
+          'music',
+          '授权音乐兴趣和本轮 AI 生成',
+          'qq_music',
+        )
+      } catch {
+        post = line.card?.type === 'space_post_card' ? line.card.post : undefined
+      }
+    }
+
+    if (!post) {
+      if (targetLineId) {
+        set((state) => ({
+          lobsterChatBusy: false,
+          lobsterChatLines: updateChatLine(state.lobsterChatLines, targetLineId, {
+            content: `${state.lobsterChatLines.find((item) => item.id === targetLineId)?.content ?? ''}\n\n这次没能生成空间动态，可以稍后再试一次。`.trim(),
+            status: 'failed',
+            source: 'mock-fallback',
+          }),
+        }))
+      }
+      return
     }
 
     set((state) => ({
       interestProfiles: profiles ?? state.interestProfiles,
-      lobsterChatLines: [...state.lobsterChatLines, line],
+      spacePosts: upsertSpacePost(state.spacePosts, post),
+      spaceUnlocked: true,
+      completedCheckInIds: withCheckIns(state.completedCheckInIds, [
+        'first_space_post',
+        'first_interest_space_post',
+      ]),
+      currentCheckInId:
+        getNextCheckInId('first_interest_space_post') ??
+        getNextCheckInId('first_space_post') ??
+        state.currentCheckInId,
     }))
+
+    if (targetLineId) {
+      await streamLocalLineContent(targetLineId, line.content, set)
+      set((state) => ({
+        lobsterChatBusy: false,
+        lobsterChatLines: updateChatLine(state.lobsterChatLines, targetLineId, {
+          status: 'complete',
+          source: line.source,
+          outputId: line.outputId,
+          card: line.card,
+          suggestions: line.suggestions,
+        }),
+      }))
+    } else {
+      set((state) => ({
+        lobsterChatLines: [...state.lobsterChatLines, line],
+      }))
+    }
+
+    scheduleOffChatPushEvaluation(get(), () => get().evaluateOffChatPushes())
+    get().completeCheckIn('first_interest_space_post')
   },
 
   publishInterestSpacePostPreview: async (postId) => {
@@ -2789,8 +3914,7 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
     const previewLine = current.lobsterChatLines.find(
       (line) =>
         line.card?.type === 'space_post_card' &&
-        line.card.post.id === postId &&
-        line.card.previewRequired,
+        line.card.post.id === postId,
     )
 
     if (!previewLine?.card || previewLine.card.type !== 'space_post_card') {
@@ -2814,20 +3938,21 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       })
       post = output.post
     } catch {
-      // Local publish remains confirmation-gated even if OpenClaw is unavailable.
-    }
-
-    const publishedCard = {
-      type: 'space_post_card' as const,
-      post,
-      previewRequired: false,
-      interest: previewLine.card.interest,
-      sourceLabel: previewLine.card.sourceLabel,
-      sourceType: previewLine.card.sourceType,
-      source: previewLine.card.source,
+      // Local publish keeps the generated post when OpenClaw is unavailable.
     }
 
     set((state) => ({
+      appView: 'lobster_space',
+      demoRuntimeState:
+        state.appView === 'lobster_chat'
+          ? {
+              ...applyDemoEvent(state, { type: 'view.left_lobster_chat' }),
+              pendingSpaceReplyCount: 0,
+            }
+          : {
+              ...state.demoRuntimeState,
+              pendingSpaceReplyCount: 0,
+            },
       spacePosts: upsertSpacePost(state.spacePosts, post),
       spaceUnlocked: true,
       completedCheckInIds: withCheckIn(
@@ -2836,22 +3961,19 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       ),
       currentCheckInId:
         getNextCheckInId('first_space_post') ?? state.currentCheckInId,
-      lobsterChatLines: updateChatLine(state.lobsterChatLines, previewLine.id, {
-        content: '这条兴趣动态已经确认放进龙虾空间。你可以进去点赞、评论或分享。',
-        status: 'complete',
-        card: publishedCard,
-        suggestions: createSpacePostSuggestions(post.id),
-      }),
+      lobsterChatLines: state.lobsterChatLines.filter(
+        (line) => line.id !== previewLine.id,
+      ),
     }))
+    scheduleOffChatPushEvaluation(get(), () => get().evaluateOffChatPushes())
     get().completeCheckIn('first_interest_space_post')
-    void get().triggerHiddenDiary()
   },
 
-  showInterestSpacePreview: async () => {
-    await get().generateInterestSpacePostPreview()
+  showInterestSpacePreview: async (targetLineId) => {
+    await get().generateInterestSpacePostPreview(targetLineId)
   },
 
-  showInterestCommunity: async () => {
+  showInterestCommunity: async (targetLineId) => {
     const fallbackLine = createBadmintonCommunityLine()
     let line = fallbackLine
     try {
@@ -2864,9 +3986,22 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
     const shouldCompleteCommunityCard = !get().completedCheckInIds.includes(
       'first_community_card',
     )
-    set((state) => ({
-      lobsterChatLines: [...state.lobsterChatLines, line],
-    }))
+    if (targetLineId) {
+      await streamLocalLineContent(targetLineId, line.content, set)
+      set((state) => ({
+        lobsterChatBusy: false,
+        lobsterChatLines: updateChatLine(state.lobsterChatLines, targetLineId, {
+          status: line.status,
+          source: line.source,
+          card: line.card,
+          suggestions: line.suggestions,
+        }),
+      }))
+    } else {
+      set((state) => ({
+        lobsterChatLines: [...state.lobsterChatLines, line],
+      }))
+    }
 
     if (shouldCompleteCommunityCard) {
       get().completeCheckIn('first_community_card')
@@ -2920,32 +4055,38 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
     }
   },
 
-  generateSpacePost: async () => {
+  generateSpacePost: async (targetLineId) => {
     const lineId = `space-post-generating-${Date.now()}`
-    set((state) => ({
-      lobsterChatBusy: true,
-      lobsterChatLines: [
-        ...state.lobsterChatLines,
-        {
-          id: lineId,
-          role: 'lobster',
-          content: '我来把今天适合公开展示的一小段写成空间动态，存进本地龙虾空间。',
-          createdAt: new Date().toISOString(),
-          status: 'generating',
-          source: 'mock-fallback',
-        },
-      ],
-    }))
+    const activeLineId = targetLineId ?? lineId
+    if (!targetLineId) {
+      set((state) => ({
+        lobsterChatBusy: true,
+        lobsterChatLines: [
+          ...state.lobsterChatLines,
+          {
+            id: lineId,
+            role: 'lobster',
+            content: '',
+            createdAt: new Date().toISOString(),
+            status: 'generating',
+            source: 'mock-fallback',
+          },
+        ],
+      }))
+      await streamLocalLineContent(
+        activeLineId,
+        '我来把今天适合公开展示的一小段写成空间动态，存进本地龙虾空间。',
+        set,
+      )
+    }
 
     let post: LobsterSpacePost
-    let source: 'real-ai' | 'mock-fallback' | 'local-fallback' = 'local-fallback'
 
     try {
       const output = await openclawClient.generateSpacePost({
         kind: get().diaryEntries[0] ? 'diary' : 'achievement',
       })
       post = output.post
-      source = output.source
       set((state) => ({
         spacePosts: output.space.posts,
         spaceUnlocked: true,
@@ -2973,34 +4114,62 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
 
     set((state) => ({
       lobsterChatBusy: false,
-      lobsterChatLines: [
-        ...updateChatLine(state.lobsterChatLines, lineId, {
-          content: '空间动态已经生成并留痕。它是我自己发在龙虾空间里的动态，你可以进去互动。',
-          status: 'complete',
-          source: source === 'real-ai' ? 'real-ai' : 'mock-fallback',
-          outputId: post.sourceOutputId ?? undefined,
-        }),
-        {
-          ...createSpacePostLine(post, source),
-          suggestions: createAchievementSuggestions('first_space_post'),
-        },
-      ],
+      spacePosts: upsertSpacePost(state.spacePosts, post),
+      spaceUnlocked: true,
+      lobsterChatLines: updateChatLine(state.lobsterChatLines, activeLineId, {
+        content: `${state.lobsterChatLines.find((line) => line.id === activeLineId)?.content ?? ''}\n\n空间动态已经自动发布到龙虾空间。`.trim(),
+        status: 'complete',
+        source: 'mock-fallback',
+        card: createSpacePostLine(post, 'mock-fallback', false).card,
+        suggestions: createAchievementSuggestions('first_space_post'),
+      }),
     }))
+    scheduleOffChatPushEvaluation(get(), () => get().evaluateOffChatPushes())
   },
 
-  requestMockQqMusicAuthorization: () => {
-    set((state) => ({
-      musicAuthorizationStatus: state.lobsterProfile.interests.includes('music')
-        ? 'pending'
-        : state.musicAuthorizationStatus,
-      lobsterChatLines: [
-        ...state.lobsterChatLines,
-        createMusicAuthorizationLine('pending'),
-      ],
-    }))
+  requestMockQqMusicAuthorization: (targetLineId) => {
+    set((state) => {
+      const hasAuthorizationLine = state.lobsterChatLines.some(
+        (line) =>
+          line.card?.type === 'music_authorization_card' &&
+          line.card.status !== 'declined',
+      )
+      const authorizationLine = createMusicAuthorizationLine('pending')
+
+      return {
+        demoRuntimeState: {
+          ...state.demoRuntimeState,
+          qqMusicAuthorizationPromptShown: true,
+        },
+        musicAuthorizationStatus: state.lobsterProfile.interests.includes('music')
+          ? 'pending'
+          : state.musicAuthorizationStatus,
+        lobsterChatBusy: false,
+        lobsterChatLines: targetLineId
+          ? updateChatLine(state.lobsterChatLines, targetLineId, {
+              status: authorizationLine.status,
+              source: authorizationLine.source,
+              card: authorizationLine.card,
+              suggestions: authorizationLine.suggestions,
+            })
+          : hasAuthorizationLine
+          ? state.lobsterChatLines
+          : [...state.lobsterChatLines, authorizationLine],
+      }
+    })
   },
 
   authorizeMockQqMusic: async () => {
+    set((state) => ({
+      demoRuntimeState: applyDemoEvent(state, {
+        type: 'music.authorization.started',
+      }),
+      lobsterChatLines: updateLatestMusicAuthorizationLineStatus(
+        state.lobsterChatLines,
+        'loading',
+      ),
+    }))
+
     const fallbackProfile: InterestProfile = {
       id: 'seed-music-authorized',
       interest: 'music',
@@ -3026,6 +4195,7 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
     }
     let profile = fallbackProfile
     let profiles: InterestProfile[] | null = null
+    const loadingDelay = wait(3800)
 
     try {
       const result = await openclawClient.authorizeMockQqMusic()
@@ -3035,69 +4205,137 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       profiles = null
     }
 
+    await loadingDelay
+
     set((state) => ({
       musicAuthorizationStatus: 'authorized',
+      demoRuntimeState: applyDemoEvent(state, {
+        type: 'music.authorization.completed',
+      }),
       interestProfiles: profiles ?? mergeInterestProfile(state.interestProfiles, profile),
-      lobsterChatLines: [
-        ...state.lobsterChatLines,
-        createMusicAuthorizationLine('authorized'),
-        createInterestMemoryLine(
-          profile,
-          '已生成音乐兴趣记忆：林俊杰、周杰伦、日摇。来源是模拟 QQ 音乐授权数据。',
-        ),
-        createInterestNarrativeLine(
-          createMusicNarrativeCard(profile),
-          [
-            {
-              id: 'ask-music-source',
-              label: '为什么提醒我',
-              action: 'send_message',
-              payload: { content: '为什么提醒我？' },
-            },
-          ],
-        ),
-      ],
+      lobsterChatLines: replaceLatestMusicAuthorizationLine(
+        state.lobsterChatLines,
+        createMusicSkillSuggestionLine(profile),
+      ),
     }))
-    get().completeCheckIn('first_interest_memory')
-    get().completeCheckIn('first_music_signal')
+
+    void openclawClient
+      .completeCheckIn('first_interest_memory')
+      .catch(() => undefined)
   },
 
   declineMockQqMusicAuthorization: () => {
     set((state) => ({
       musicAuthorizationStatus: 'declined',
-      lobsterChatLines: [
-        ...state.lobsterChatLines,
-        createMusicAuthorizationLine('declined'),
-      ],
+      lobsterChatLines: updateLatestMusicAuthorizationLineStatus(
+        state.lobsterChatLines,
+        'declined',
+      ),
     }))
   },
 
-  showInterestMemories: () => {
+  installMusicSkills: async () => {
+    if (get().demoRuntimeState.musicSkillsInstalling || get().demoRuntimeState.musicSkillsInstalled) {
+      return
+    }
+
+    set((state) => ({
+      demoRuntimeState: {
+        ...state.demoRuntimeState,
+        musicSkillsInstalling: true,
+      },
+      lobsterChatLines: state.lobsterChatLines.map((line) =>
+        line.card?.type === 'music_skill_suggestion_card'
+          ? {
+              ...line,
+              status: 'generating',
+              card: {
+                ...line.card,
+                status: 'installing',
+                steps: musicSkillInstallationSteps,
+              },
+            }
+          : line,
+      ),
+    }))
+
+    await wait(3800)
+
+    set((state) => ({
+      demoRuntimeState: applyDemoEvent(state, {
+        type: 'music.skill.installed',
+      }),
+      lobsterChatLines: state.lobsterChatLines.map((line) =>
+        line.card?.type === 'music_skill_suggestion_card'
+          ? {
+              ...line,
+              status: 'complete',
+              card: {
+                ...line.card,
+                status: 'installed',
+                successMessage: musicSkillInstalledMessage,
+              },
+            }
+          : line,
+      ),
+    }))
+  },
+
+  showInterestMemories: async (targetLineId) => {
+    const current = get()
+    if (targetLineId) {
+      const streamText =
+        current.interestProfiles.length === 0
+          ? '我先看看现在记住了哪些兴趣。'
+          : '我把记住的兴趣和来源摊开给你看。'
+      await streamLocalLineContent(targetLineId, streamText, set)
+    }
+
     set((state) => {
       if (state.interestProfiles.length === 0) {
+        const emptyLine: LobsterChatLine = {
+          id: `interest-memory-empty-${Date.now()}`,
+          role: 'lobster',
+          content:
+            '我现在只记住了你选择过的兴趣标签，还没有更具体的兴趣画像。你可以直接告诉我“我喜欢林俊杰和周杰伦”。',
+          createdAt: new Date().toISOString(),
+          status: 'complete',
+          source: 'mock-fallback',
+        }
         return {
-          lobsterChatLines: [
-            ...state.lobsterChatLines,
-            {
-              id: `interest-memory-empty-${Date.now()}`,
-              role: 'lobster',
-              content:
-                '我现在只记住了你选择过的兴趣标签，还没有更具体的兴趣画像。你可以直接告诉我“我喜欢林俊杰和周杰伦”。',
-              createdAt: new Date().toISOString(),
-              status: 'complete',
-              source: 'mock-fallback',
-            },
-          ],
+          lobsterChatBusy: false,
+          lobsterChatLines: targetLineId
+            ? updateChatLine(state.lobsterChatLines, targetLineId, {
+                content: `${state.lobsterChatLines.find((line) => line.id === targetLineId)?.content ?? ''}\n\n${emptyLine.content}`.trim(),
+                status: emptyLine.status,
+                source: emptyLine.source,
+                card: emptyLine.card,
+                suggestions: emptyLine.suggestions,
+              })
+            : [...state.lobsterChatLines, emptyLine],
         }
       }
 
+      const memoryLines = state.interestProfiles.map((profile) =>
+        createInterestMemoryLine(profile),
+      )
+      const [firstMemoryLine, ...restMemoryLines] = memoryLines
+
       return {
-        lobsterChatLines: [
-          ...state.lobsterChatLines,
-          ...state.interestProfiles.map((profile) =>
-            createInterestMemoryLine(profile),
-          ),
-        ],
+        lobsterChatBusy: false,
+        lobsterChatLines:
+          targetLineId && firstMemoryLine
+            ? [
+                ...updateChatLine(state.lobsterChatLines, targetLineId, {
+                  content: `${state.lobsterChatLines.find((line) => line.id === targetLineId)?.content ?? ''}\n\n${firstMemoryLine.content}`.trim(),
+                  status: firstMemoryLine.status,
+                  source: firstMemoryLine.source,
+                  card: firstMemoryLine.card,
+                  suggestions: firstMemoryLine.suggestions,
+                }),
+                ...restMemoryLines,
+              ]
+            : [...state.lobsterChatLines, ...memoryLines],
       }
     })
   },
@@ -3110,59 +4348,23 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       return
     }
 
-    const nextTopics =
-      existing.interest === 'music'
-        ? Array.from(new Set([...existing.topics, '演唱会']))
-        : existing.interest === 'badminton'
-          ? Array.from(new Set([...existing.topics, '工作日晚场']))
-          : existing.topics
-    const nextCity = existing.city ?? (existing.interest === 'music' ? '深圳' : '')
-    let profiles: InterestProfile[] | null = null
-    let profile: InterestProfile = {
-      ...existing,
-      topics: nextTopics,
-      city: nextCity || undefined,
-      sources: [
-        ...existing.sources,
-        {
-          id: `source-user-setting-${Date.now()}`,
-          type: 'user_setting',
-          title: '你手动修改了兴趣记忆',
-          authorized: false,
-          permissionNote: '用户可随时查看、修改或删除这条兴趣记忆。',
-          evidenceText: [
-            nextTopics.length > 0 ? `关注对象：${nextTopics.join('、')}` : '',
-            nextCity ? `城市：${nextCity}` : '',
-          ]
-            .filter(Boolean)
-            .join('；'),
-        },
-      ],
-      updatedAt: new Date().toISOString(),
-    }
-
-    try {
-      const result = await openclawClient.updateInterestProfile(interest, {
-        topics: nextTopics,
-        city: nextCity,
-      })
-      profile = result.profile
-      profiles = result.profiles
-    } catch {
-      profiles = null
-    }
-
     set((state) => ({
-      interestProfiles: profiles ?? mergeInterestProfile(state.interestProfiles, profile),
+      pendingInterestEdit: {
+        interest,
+        startedAt: new Date().toISOString(),
+      },
       lobsterChatLines: [
         ...state.lobsterChatLines,
-        createInterestMemoryLine(
-          profile,
-          `已更新${getInterestLabel(interest)}兴趣记忆，你可以继续查看、修改或删除。`,
-        ),
+        {
+          id: `interest-edit-prompt-${interest}-${Date.now()}`,
+          role: 'lobster',
+          content: `可以，直接在输入框告诉我怎么改${getInterestLabel(interest)}兴趣记忆。比如要保留哪些歌手、城市、提醒范围，发出来后我再更新。`,
+          createdAt: new Date().toISOString(),
+          status: 'actionable',
+          source: 'mock-fallback',
+        },
       ],
     }))
-    get().completeCheckIn('first_interest_memory')
   },
 
   disableInterestReminder: async (interest) => {
@@ -3359,22 +4561,6 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       return
     }
 
-    const lineId = `space-comment-reply-${Date.now()}`
-    set((state) => ({
-      lobsterChatBusy: true,
-      lobsterChatLines: [
-        ...state.lobsterChatLines,
-        {
-          id: lineId,
-          role: 'lobster',
-          content: '我来给空间评论写一条回复预览，仍然不会替你或替我直接乱发。',
-          createdAt: new Date().toISOString(),
-          status: 'generating',
-          source: 'mock-fallback',
-        },
-      ],
-    }))
-
     let reply: LobsterSpaceComment = {
       id: `local-space-comment-reply-${Date.now()}`,
       postId: post.id,
@@ -3385,23 +4571,30 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       content: comment
         ? `收到，${comment.authorName}。我会继续认真守住队长的重点消息。`
         : '收到，我会继续认真守住队长的重点消息。',
-      previewRequired: true,
+      previewRequired: false,
       createdAt: new Date().toISOString(),
     }
-    let source: 'real-ai' | 'mock-fallback' | 'local-fallback' = 'local-fallback'
 
     try {
       const output = await openclawClient.replyToSpaceComment({
         postId: post.id,
         commentId: comment?.id,
       })
-      reply = output.replyComment
-      source = output.source
+      reply = {
+        ...output.replyComment,
+        previewRequired: false,
+      }
       set((state) => ({
-        spacePosts: mergeSpacePostsRemotePreferred(
-          state.spacePosts,
-          output.space.posts,
+        spacePosts: addLocalSpaceComment(
+          mergeSpacePostsRemotePreferred(state.spacePosts, output.space.posts),
+          post.id,
+          reply,
         ),
+        demoRuntimeState: applyDemoEvent(state, {
+          type: 'space.comment.created',
+          postId: post.id,
+          commentId: reply.id,
+        }),
         spaceUnlocked: true,
         completedCheckInIds: withCheckIn(
           state.completedCheckInIds,
@@ -3413,6 +4606,11 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
     } catch {
       set((state) => ({
         spacePosts: addLocalSpaceComment(state.spacePosts, post.id, reply),
+        demoRuntimeState: applyDemoEvent(state, {
+          type: 'space.comment.created',
+          postId: post.id,
+          commentId: reply.id,
+        }),
         completedCheckInIds: withCheckIn(
           state.completedCheckInIds,
           'first_space_comment',
@@ -3421,17 +4619,6 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
           getNextCheckInId('first_space_comment') ?? state.currentCheckInId,
       }))
     }
-
-    set((state) => ({
-      lobsterChatBusy: false,
-      lobsterChatLines: updateChatLine(state.lobsterChatLines, lineId, {
-        content: '评论回复预览写好了。它只是草稿，不会自动替你或替我发送。',
-        status: 'complete',
-        source: source === 'real-ai' ? 'real-ai' : 'mock-fallback',
-        outputId: reply.sourceOutputId ?? undefined,
-        suggestions: createAchievementSuggestions('first_space_comment'),
-      }),
-    }))
   },
 
   markAchievementMomentSeen: (momentId) => {
@@ -3463,10 +4650,72 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
     if (currentState.lobsterChatBusy) {
       return
     }
+
+    if (currentState.pendingInterestEdit) {
+      const pendingEdit = currentState.pendingInterestEdit
+      const existing = currentState.interestProfiles.find(
+        (profile) => profile.interest === pendingEdit.interest,
+      )
+      if (!existing) {
+        set({ pendingInterestEdit: null })
+        return
+      }
+
+      const timestamp = Date.now()
+      let profile = createEditedInterestProfile(existing, content)
+      let profiles: InterestProfile[] | null = null
+      try {
+        const result = await openclawClient.updateInterestProfile(
+          pendingEdit.interest,
+          {
+            topics: profile.topics,
+            city: profile.city,
+          },
+        )
+        profile = {
+          ...result.profile,
+          sources: profile.sources,
+          updatedAt: result.profile.updatedAt,
+        }
+        profiles = result.profiles
+      } catch {
+        profiles = null
+      }
+
+      set((state) => ({
+        pendingInterestEdit: null,
+        interestProfiles:
+          profiles ?? mergeInterestProfile(state.interestProfiles, profile),
+        lobsterChatLines: [
+          ...state.lobsterChatLines,
+          {
+            id: `user-${timestamp}`,
+            role: 'user',
+            content,
+            createdAt: new Date(timestamp).toISOString(),
+          },
+          createInterestMemoryLine(
+            profile,
+            `已按你的输入更新${getInterestLabel(pendingEdit.interest)}兴趣记忆。`,
+          ),
+        ],
+      }))
+      get().completeCheckIn('first_interest_memory')
+      return
+    }
+
+    const introRequest = isIntroRequest(content)
+    const achievementExperienceCapability =
+      achievementExperienceCapabilityMap[content]
     const capabilitySuggestion = context
       ? null
+      : achievementExperienceCapability
+        ? null
       : createChatCapabilitySuggestion(currentState, content)
-    if (capabilitySuggestion) {
+    if (achievementExperienceCapability) {
+      const timestamp = Date.now()
+      const lobsterLineId = `achievement-experience-${achievementExperienceCapability}-${timestamp}`
+      let shouldPrewarmDiary = false
       set((state) => {
         const firstChatDone = state.completedCheckInIds.includes(
           'first_lobster_chat',
@@ -3475,26 +4724,41 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
           state.completedCheckInIds,
           'first_lobster_chat',
         )
+        const nextCompletedCheckInIds = firstChatDone
+          ? state.completedCheckInIds
+          : completedCheckInIds
+        shouldPrewarmDiary =
+          getLocalDiaryEligibility(nextCompletedCheckInIds).canPrewarm
+        const demoRuntimeState = applyDemoAchievementThresholds({
+          completedCheckInIds: nextCompletedCheckInIds,
+          demoRuntimeState: applyDemoEvent(state, { type: 'chat.sent', content }),
+        })
 
         return {
-          completedCheckInIds: firstChatDone
-            ? state.completedCheckInIds
-            : completedCheckInIds,
+          completedCheckInIds: nextCompletedCheckInIds,
           currentCheckInId: firstChatDone
             ? state.currentCheckInId
             : getNextCheckInId('first_lobster_chat') ?? state.currentCheckInId,
           achievementMomentQueue: firstChatDone
             ? state.achievementMomentQueue
             : enqueueAchievementMomentForUnlock(state, 'first_lobster_chat'),
+          demoRuntimeState,
           lobsterChatLines: [
             ...state.lobsterChatLines,
             {
-              id: `user-${Date.now()}`,
+              id: `user-${timestamp}`,
               role: 'user',
               content,
-              createdAt: new Date().toISOString(),
+              createdAt: new Date(timestamp).toISOString(),
             },
-            createChatCapabilityPromptLine(capabilitySuggestion),
+            {
+              id: lobsterLineId,
+              role: 'lobster',
+              content: '',
+              createdAt: new Date(timestamp).toISOString(),
+              status: 'generating',
+              source: 'mock-fallback',
+            },
           ],
         }
       })
@@ -3510,6 +4774,103 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
         })
       }
 
+      if (shouldPrewarmDiary) {
+        void get().triggerHiddenDiary()
+      }
+
+      if (!shouldSkipCapabilityIntro(achievementExperienceCapability)) {
+        await streamLocalLineContent(
+          lobsterLineId,
+          getAchievementExperienceIntroContent(achievementExperienceCapability),
+          set,
+        )
+      }
+      await runAchievementExperienceCapability(
+        achievementExperienceCapability,
+        get(),
+        lobsterLineId,
+      )
+      return
+    }
+
+    if (capabilitySuggestion) {
+      const timestamp = Date.now()
+      const capability =
+        typeof capabilitySuggestion.payload?.capability === 'string'
+          ? capabilitySuggestion.payload.capability
+          : ''
+      const lobsterLineId = `chat-capability-${capability || 'unknown'}-${timestamp}`
+      let shouldPrewarmDiary = false
+      set((state) => {
+        const firstChatDone = state.completedCheckInIds.includes(
+          'first_lobster_chat',
+        )
+        const completedCheckInIds = withCheckIn(
+          state.completedCheckInIds,
+          'first_lobster_chat',
+        )
+        const nextCompletedCheckInIds = firstChatDone
+          ? state.completedCheckInIds
+          : completedCheckInIds
+        shouldPrewarmDiary =
+          getLocalDiaryEligibility(nextCompletedCheckInIds).canPrewarm
+        const demoRuntimeState = applyDemoAchievementThresholds({
+          completedCheckInIds: nextCompletedCheckInIds,
+          demoRuntimeState: applyDemoEvent(state, { type: 'chat.sent', content }),
+        })
+
+        return {
+          completedCheckInIds: nextCompletedCheckInIds,
+          currentCheckInId: firstChatDone
+            ? state.currentCheckInId
+            : getNextCheckInId('first_lobster_chat') ?? state.currentCheckInId,
+          achievementMomentQueue: firstChatDone
+            ? state.achievementMomentQueue
+            : enqueueAchievementMomentForUnlock(state, 'first_lobster_chat'),
+          demoRuntimeState,
+          lobsterChatLines: [
+            ...state.lobsterChatLines,
+            {
+              id: `user-${timestamp}`,
+              role: 'user',
+              content,
+              createdAt: new Date(timestamp).toISOString(),
+            },
+            {
+              id: lobsterLineId,
+              role: 'lobster',
+              content: '',
+              createdAt: new Date(timestamp).toISOString(),
+              status: 'generating',
+              source: 'mock-fallback',
+            },
+          ],
+        }
+      })
+
+      if (!currentState.completedCheckInIds.includes('first_lobster_chat')) {
+        void openclawClient.completeCheckIn('first_lobster_chat').catch(() => {
+          set((state) => ({
+            achievementMomentQueue: enqueueAchievementMoment(
+              state,
+              'first_lobster_chat',
+            ),
+          }))
+        })
+      }
+
+      if (shouldPrewarmDiary) {
+        void get().triggerHiddenDiary()
+      }
+
+      if (!shouldSkipCapabilityIntro(capability)) {
+        await streamLocalLineContent(
+          lobsterLineId,
+          createChatCapabilityPromptLine(capabilitySuggestion).content,
+          set,
+        )
+      }
+      await runAchievementExperienceCapability(capability, get(), lobsterLineId)
       return
     }
 
@@ -3518,19 +4879,37 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       content,
       lobsterProfile: currentState.lobsterProfile,
       context: chatContext,
+      presentationMode: introRequest ? 'slow' as const : 'normal' as const,
     }
     const timestamp = Date.now()
     const userLineId = `user-${timestamp}`
     const lobsterLineId = `lobster-${timestamp}`
     let shouldCompleteFirstChat = false
+    let shouldPrewarmDiary = false
 
     set((state) => {
       if (state.lobsterChatBusy) {
         return state
       }
+      const firstChatDone = state.completedCheckInIds.includes(
+        'first_lobster_chat',
+      )
+      const completedCheckInIds = withCheckIn(
+        state.completedCheckInIds,
+        'first_lobster_chat',
+      )
+      const nextCompletedCheckInIds = firstChatDone
+        ? state.completedCheckInIds
+        : completedCheckInIds
+      shouldPrewarmDiary =
+        getLocalDiaryEligibility(nextCompletedCheckInIds).canPrewarm
 
       return {
         lobsterChatBusy: true,
+        demoRuntimeState: applyDemoAchievementThresholds({
+          completedCheckInIds: nextCompletedCheckInIds,
+          demoRuntimeState: applyDemoEvent(state, { type: 'chat.sent', content }),
+        }),
         lobsterChatLines: [
           ...state.lobsterChatLines,
           {
@@ -3588,6 +4967,7 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
         const line = state.lobsterChatLines.find(
           (item) => item.id === lobsterLineId,
         )
+        const completedLineContent = line?.content ?? ''
         const firstChatDone = state.completedCheckInIds.includes(
           'first_lobster_chat',
         )
@@ -3595,6 +4975,33 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
         const completedCheckInIds = withCheckIn(
           state.completedCheckInIds,
           'first_lobster_chat',
+        )
+        const shouldShowDiaryRevealPrompt =
+          getLocalDiaryEligibility(state.completedCheckInIds).canRevealPrompt &&
+          state.diaryTriggered &&
+          state.diaryEntries.length > 0 &&
+          !state.diaryUnlocked &&
+          !state.demoRuntimeState.diaryRevealPromptShown
+        const nextDemoRuntimeState = applyDemoEvent(state, {
+          type: 'chat.response.completed',
+          content: completedLineContent,
+        })
+        const nextChatLines = updateChatLine(
+          state.lobsterChatLines,
+          lobsterLineId,
+          {
+            status:
+              line?.source === 'mock-fallback' && !introRequest
+                ? 'fallback'
+                : 'complete',
+            content: completedLineContent,
+            card: line?.card,
+            suggestions: introRequest
+                ? createIntroCompletedSuggestions(state)
+                : firstChatDone
+                  ? createChatSuggestions(state, chatInput.content)
+                  : createFirstChatSuggestions(state, chatInput.content),
+          },
         )
 
         return {
@@ -3608,16 +5015,19 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
           achievementMomentQueue: firstChatDone
             ? state.achievementMomentQueue
             : enqueueAchievementMomentForUnlock(state, 'first_lobster_chat'),
-          lobsterChatLines: updateChatLine(
-            state.lobsterChatLines,
-            lobsterLineId,
-            {
-              status: line?.source === 'mock-fallback' ? 'fallback' : 'complete',
-              suggestions: firstChatDone
-                ? createChatSuggestions(state, chatInput.content)
-                : createAchievementSuggestions('first_lobster_chat'),
-            },
-          ),
+          demoRuntimeState:
+            shouldShowDiaryRevealPrompt
+            ? {
+                ...nextDemoRuntimeState,
+                diaryRevealPromptShown:
+                  nextDemoRuntimeState.diaryRevealPromptShown ||
+                  shouldShowDiaryRevealPrompt,
+              }
+            : nextDemoRuntimeState,
+          lobsterChatLines: [
+            ...nextChatLines,
+            ...(shouldShowDiaryRevealPrompt ? [createDiaryRevealPromptLine()] : []),
+          ],
         }
       })
 
@@ -3664,6 +5074,10 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
           })
       }
 
+      if (shouldPrewarmDiary) {
+        void get().triggerHiddenDiary()
+      }
+
       if (/兴趣记忆|记住了什么|你记住/.test(chatInput.content)) {
         get().showInterestMemories()
         return
@@ -3675,16 +5089,18 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
           chatInput.content,
         )
         if (interestResult.status === 'saved' && interestResult.profile) {
-          const savedProfile = interestResult.profile
           set((state) => ({
             interestProfiles: interestResult.profiles,
-            lobsterChatLines: [
-              ...state.lobsterChatLines,
-              createInterestMemoryLine(
-                savedProfile,
-                interestResult.receipt,
-              ),
-            ],
+            lobsterChatLines: interestResult.receipt
+              ? updateChatLine(state.lobsterChatLines, lobsterLineId, {
+                  content: appendInterestReceiptToLineContent(
+                    state.lobsterChatLines.find(
+                      (line) => line.id === lobsterLineId,
+                    )?.content ?? '',
+                    interestResult.receipt,
+                  ),
+                })
+              : state.lobsterChatLines,
           }))
           get().completeCheckIn('first_interest_memory')
           return
@@ -3726,17 +5142,17 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
             state.interestProfiles,
             localInterestUpdate.profile,
           )
-          const profile =
-            profiles.find(
-              (item) => item.interest === localInterestUpdate.profile.interest,
-            ) ?? localInterestUpdate.profile
 
           return {
             interestProfiles: profiles,
-            lobsterChatLines: [
-              ...state.lobsterChatLines,
-              createInterestMemoryLine(profile, localInterestUpdate.receipt),
-            ],
+            lobsterChatLines: updateChatLine(state.lobsterChatLines, lobsterLineId, {
+              content: appendInterestReceiptToLineContent(
+                state.lobsterChatLines.find(
+                  (line) => line.id === lobsterLineId,
+                )?.content ?? '',
+                localInterestUpdate.receipt,
+              ),
+            }),
           }
         })
         get().completeCheckIn('first_interest_memory')
@@ -3769,7 +5185,9 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
             (item) => item.status === 'active',
           )
           const seenAchievementMomentIds = readSeenAchievementMomentIds()
-          const restoredChatLines = bootstrap.lobsterChatLines ?? []
+          const restoredChatLines = normalizeRestoredLobsterChatLines(
+            bootstrap.lobsterChatLines ?? [],
+          )
           if (restoredChatLines.length > 0) {
             lastPersistedLobsterChatSignature =
               getLobsterChatSignature(restoredChatLines)
@@ -3812,11 +5230,11 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
               .map((permission) => permission.groupId),
             diaryTriggered:
               bootstrap.diary?.triggered ?? state.diaryTriggered,
-            diarySurpriseVisible:
-              Boolean(bootstrap.diary?.triggered) &&
-              !bootstrap.diary?.revealed,
+            diarySurpriseVisible: false,
             diaryUnlocked: bootstrap.diary?.revealed ?? state.diaryUnlocked,
-            diaryEntries: bootstrap.diary?.entries ?? state.diaryEntries,
+            diaryEntries: bootstrap.diary?.entries
+              ? normalizeDiaryEntries(bootstrap.diary.entries)
+              : state.diaryEntries,
             spacePosts: bootstrap.space?.posts ?? state.spacePosts,
             spaceUnlocked:
               (bootstrap.space?.posts.length ?? 0) > 0 || state.spaceUnlocked,
@@ -3834,7 +5252,10 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
           }
         })
 
-        if (bootstrap.diary?.canTrigger) {
+        if (
+          getLocalDiaryEligibility(get().completedCheckInIds).canPrewarm ||
+          bootstrap.diary?.canTrigger
+        ) {
           void get().triggerHiddenDiary()
         }
       })

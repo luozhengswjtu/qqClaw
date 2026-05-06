@@ -84,8 +84,8 @@ export function AdoptionFlow() {
 
         <div className="min-h-[420px] px-6 py-6">
           {step === 'hello' ? (
-            <div className="grid gap-6 md:grid-cols-[140px_1fr] md:items-center">
-              <div className="mx-auto rounded-lg bg-lobster-50 p-5">
+            <div className="grid gap-6 rounded-lg bg-white md:grid-cols-[140px_1fr] md:items-center">
+              <div className="mx-auto rounded-lg bg-white p-5 ring-1 ring-slate-100">
                 <LobsterAvatar size="lg" mood="curious" animated />
               </div>
               <div className="space-y-5">

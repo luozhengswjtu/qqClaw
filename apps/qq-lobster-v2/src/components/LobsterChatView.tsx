@@ -55,6 +55,17 @@ const chatStatusLabel: Record<
   failed: '失败',
 }
 
+const capabilityDrafts: Record<string, string> = {
+  reply_draft: '小钳，帮我写一条回复草稿',
+  work_log: '小钳，今天你都做了什么',
+  space_post: '小钳，帮你发一条龙虾空间动态吧',
+  space_comment: '小钳，我们去龙虾空间看看评论',
+  interest_memory: '小钳，看看你记住了我的什么兴趣',
+  interest_music_reminder: '小钳，给我讲讲最近的音乐动态',
+  interest_space_preview: '小钳，把音乐动态生成一条空间动态',
+  interest_community: '小钳，帮我看看有没有公开资料里的同好群',
+}
+
 type RightPanelTab = 'achievements' | 'accessories' | 'interests' | 'diary'
 
 const equippedAccessoryStorageKey = 'qqclaw.equippedAccessoryId.v1'
@@ -64,13 +75,59 @@ const interestAccessoryIds = new Set([
   'lookout-shell',
 ])
 
+const maxPermissionGroupCount = 3
+const defaultSummaryScheduleTime = '21:30'
+const achievementExperienceDrafts: Record<string, string> = {
+  first_claw_touch: '小钳，你好呀，介绍你自己',
+  first_group_signal: '小钳，帮我设置一个群聊总结提醒',
+  first_work_log: '小钳，今天你都做了什么',
+  first_space_post: '小钳，帮你发一条龙虾空间动态吧',
+  first_space_reply: '小钳，我们去龙虾空间看看评论',
+  first_interest_memory: '小钳，看看你记住了我的什么兴趣',
+  first_music_signal: '小钳，给我讲讲最近的音乐动态',
+  first_interest_space_post: '小钳，把音乐动态生成一条空间动态',
+  first_community_card: '小钳，帮我看看有没有公开资料里的同好群',
+  community_saved: '小钳，帮我看看有没有公开资料里的同好群，我想先收藏一下',
+}
+
+function isLegacyInterestSpacePublishSuggestion(suggestion: LobsterSuggestion) {
+  return suggestion.payload?.capability === 'publish_interest_space_post'
+}
+
+const oldIntroSelfIntroductionPattern =
+  /我是你的小龙虾(.+?)，住在 QQ 里。\s*我可以陪你聊天，也可以在你授权后帮你留意群聊重点、写回复草稿、整理我做过的事。\s*等你慢慢探索成就墙，我还能写日记、发我的龙虾空间动态，解锁挂饰和成就。\s*我也可以处理一些文档和代码，像整理内容、改写说明、帮你看一段代码，都可以试试。\s*另外，我也对音乐有点兴趣。\s*如果你愿意授权 QQ 音乐，我们可以一起关注喜欢的歌手、新歌和演出动态。/
+
+function formatIntroSelfIntroduction(content: string) {
+  const match = content.match(oldIntroSelfIntroductionPattern)
+  if (!match) {
+    return content
+  }
+
+  const lobsterName = match[1]
+  return [
+    `我是你的小龙虾${lobsterName}，住在 QQ 里。`,
+    '我会先陪你聊天，慢慢记住你的习惯和偏好。',
+    '',
+    '我能帮你的事，大概分几类：',
+    '陪你聊天：记住你喜欢的东西，接住一些日常想法。',
+    '群聊授权后：整理重点、写回复草稿，真正发出去前都由你决定。',
+    '慢慢解锁：写日记、发龙虾空间动态，也会在成就墙留下成长记录。',
+    '文档和代码：整理内容、改写说明、帮你看一段代码。',
+    '',
+    '另外，我也对音乐有点兴趣。',
+    '如果你愿意授权 QQ 音乐，我们可以一起关注喜欢的歌手、新歌和演出动态。',
+  ].join('\n')
+}
+
 function isRewardUnlocked(
   reward: (typeof lobsterRewards)[number],
   completedCheckInIds: string[],
 ) {
-  return reward.requiredCheckInId
-    ? completedCheckInIds.includes(reward.requiredCheckInId)
-    : completedCheckInIds.length >= reward.requiredCheckIns
+  if (reward.requiredCheckInId) {
+    return completedCheckInIds.includes(reward.requiredCheckInId)
+  }
+
+  return completedCheckInIds.length >= reward.requiredCheckIns
 }
 
 function AccessoryPreview({
@@ -187,7 +244,7 @@ function AccessoryOnAvatar({ rewardId }: { rewardId?: string }) {
   if (rewardId === 'tiny-flag') {
     return (
       <span
-        className="absolute -right-1 top-0 flex h-9 w-7 origin-bottom-left -rotate-6 items-start justify-center"
+        className="absolute right-8 top-3 flex h-9 w-7 origin-bottom-left -rotate-6 items-start justify-center"
         aria-label="小红旗挂饰"
         title="小红旗挂饰"
       >
@@ -202,7 +259,7 @@ function AccessoryOnAvatar({ rewardId }: { rewardId?: string }) {
   if (rewardId === 'shell-badge') {
     return (
       <span
-        className="absolute -right-1 bottom-1 grid h-5 w-5 place-items-center rounded-full border border-cyan-200 bg-white shadow-sm"
+        className="absolute right-8 bottom-2 grid h-5 w-5 place-items-center rounded-full border border-cyan-200 bg-white shadow-sm"
         aria-label="亮晶晶虾壳"
         title="亮晶晶虾壳"
       >
@@ -214,7 +271,7 @@ function AccessoryOnAvatar({ rewardId }: { rewardId?: string }) {
   if (rewardId === 'logbook') {
     return (
       <span
-        className="absolute -right-1 bottom-0 h-6 w-5 rounded border border-slate-300 bg-white shadow-sm"
+        className="absolute right-8 bottom-2 h-6 w-5 rounded border border-slate-300 bg-white shadow-sm"
         aria-label="透明工作簿"
         title="透明工作簿"
       >
@@ -228,7 +285,7 @@ function AccessoryOnAvatar({ rewardId }: { rewardId?: string }) {
   if (rewardId === 'space-banner') {
     return (
       <span
-        className="absolute -right-2 top-0 h-6 w-8 overflow-hidden rounded border border-sky-200 bg-sky-100 shadow-sm"
+        className="absolute right-8 top-3 h-6 w-8 overflow-hidden rounded border border-sky-200 bg-sky-100 shadow-sm"
         aria-label="龙虾空间头图"
         title="龙虾空间头图"
       >
@@ -241,7 +298,7 @@ function AccessoryOnAvatar({ rewardId }: { rewardId?: string }) {
   if (rewardId === 'music-note') {
     return (
       <span
-        className="absolute -right-1 -top-1 grid h-6 w-6 place-items-center rounded-full border border-fuchsia-200 bg-white shadow-sm"
+        className="absolute right-8 top-2 grid h-6 w-6 place-items-center rounded-full border border-fuchsia-200 bg-white shadow-sm"
         aria-label="小音符挂饰"
         title="小音符挂饰"
       >
@@ -253,7 +310,7 @@ function AccessoryOnAvatar({ rewardId }: { rewardId?: string }) {
   if (rewardId === 'badminton-racket') {
     return (
       <span
-        className="absolute -right-2 bottom-0 h-7 w-7"
+        className="absolute right-8 bottom-2 h-7 w-7"
         aria-label="小球拍挂饰"
         title="小球拍挂饰"
       >
@@ -266,7 +323,7 @@ function AccessoryOnAvatar({ rewardId }: { rewardId?: string }) {
   if (rewardId === 'lookout-shell') {
     return (
       <span
-        className="absolute -right-1 bottom-1 grid h-5 w-6 place-items-center rounded-t-full border border-teal-200 bg-white shadow-sm"
+        className="absolute right-8 bottom-2 grid h-5 w-6 place-items-center rounded-t-full border border-teal-200 bg-white shadow-sm"
         aria-label="安全距离贴纸"
         title="安全距离贴纸"
       >
@@ -277,7 +334,7 @@ function AccessoryOnAvatar({ rewardId }: { rewardId?: string }) {
 
   return (
     <span
-      className="absolute -right-1 top-0 grid h-5 w-5 place-items-center rounded-full border border-amber-200 bg-white shadow-sm"
+      className="absolute right-8 top-3 grid h-5 w-5 place-items-center rounded-full border border-amber-200 bg-white shadow-sm"
       aria-label="星星挂饰"
       title="星星挂饰"
     >
@@ -377,12 +434,15 @@ function PermissionRequestCard({
   onSave: (permissions: GroupPermissionScope, groupIds: string[]) => void
 }) {
   const [permissions, setPermissions] = useState(initialPermissions)
-  const initialGroupIds =
+  const initialGroupIds = (
     selectedGroupIds.length > 0 ? selectedGroupIds : [initialPermissions.groupId]
+  ).slice(0, maxPermissionGroupCount)
   const [groupIds, setGroupIds] = useState(initialGroupIds)
+  const summaryScheduleTime =
+    permissions.summaryScheduleTime ?? defaultSummaryScheduleTime
   const selectedGroupTitle =
     groupIds.length > 0
-      ? `${groupIds.length} 个群已选择`
+      ? `${groupIds.length} 个群已选择 · 每天 ${summaryScheduleTime} 总结`
       : groupTitle
 
   function patchPermissions(patch: Partial<GroupPermissionScope>) {
@@ -394,6 +454,14 @@ function PermissionRequestCard({
 
   function toggleGroup(groupId: string, checked: boolean) {
     setGroupIds((current) => {
+      if (
+        checked &&
+        !current.includes(groupId) &&
+        current.length >= maxPermissionGroupCount
+      ) {
+        return current
+      }
+
       const next = checked
         ? Array.from(new Set([...current, groupId]))
         : current.filter((id) => id !== groupId)
@@ -406,6 +474,7 @@ function PermissionRequestCard({
         summarizeGroup: permissions.summarizeGroup,
         draftReply: permissions.draftReply,
         diaryMaterial: false,
+        summaryScheduleTime,
       })
       return next
     })
@@ -427,6 +496,7 @@ function PermissionRequestCard({
 
       <div className="mt-3 block text-xs font-medium text-ink-500">
         授权群聊
+        <span className="ml-2 text-ink-400">最多选择 3 个群</span>
         <div className="mt-1 space-y-2">
           {groupOptions.map((group) => (
             <label
@@ -438,13 +508,33 @@ function PermissionRequestCard({
                 className="h-4 w-4 accent-qq-500"
                 type="checkbox"
                 checked={groupIds.includes(group.id)}
-                disabled={confirmed}
+                disabled={
+                  confirmed ||
+                  (!groupIds.includes(group.id) &&
+                    groupIds.length >= maxPermissionGroupCount)
+                }
                 onChange={(event) => toggleGroup(group.id, event.target.checked)}
               />
             </label>
           ))}
         </div>
       </div>
+
+      <label className="mt-3 block rounded-lg bg-white px-3 py-2 text-xs font-medium text-ink-500">
+        每天总结时间
+        <input
+          className="mt-2 w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-ink-800 outline-none transition focus:border-qq-500 focus:bg-white focus:ring-4 focus:ring-qq-100"
+          type="time"
+          value={summaryScheduleTime}
+          disabled={confirmed}
+          onChange={(event) =>
+            patchPermissions({
+              summaryScheduleTime:
+                event.target.value || defaultSummaryScheduleTime,
+            })
+          }
+        />
+      </label>
 
       <div className="mt-3 space-y-2">
         <PermissionToggle
@@ -472,14 +562,16 @@ function PermissionRequestCard({
           id={`${lineId}-permission-note`}
         >
           <Check className="h-4 w-4" />
-          授权已确认，正在整理群聊总结
+          授权已确认，将在每天 {summaryScheduleTime} 总结，正在生成本次演示卡
         </div>
       ) : (
         <button
           className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-qq-500 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-qq-600 disabled:cursor-not-allowed disabled:bg-slate-300"
           type="button"
-          disabled={disabled || groupIds.length === 0}
-          onClick={() => onSave(permissions, groupIds)}
+          disabled={disabled || groupIds.length === 0 || !summaryScheduleTime}
+          onClick={() =>
+            onSave({ ...permissions, summaryScheduleTime }, groupIds)
+          }
           aria-describedby={`${lineId}-permission-note`}
         >
           <Check className="h-4 w-4" />
@@ -490,7 +582,7 @@ function PermissionRequestCard({
         className="mt-2 text-xs leading-5 text-ink-500"
         id={confirmed ? undefined : `${lineId}-permission-note`}
       >
-        相关 @ 会跟随对应群的总结一起展示。
+        相关 @ 会跟随对应群的总结一起展示；当前 Demo 会在确认后先生成一次总结。
       </p>
     </div>
   )
@@ -514,7 +606,7 @@ function interestLabel(interest: Interest) {
 
 function interestPersonaLabel(interest: Interest) {
   const labels: Partial<Record<Interest, string>> = {
-    music: '音乐同好',
+    music: '音乐爱好者',
     badminton: '羽毛球搭子雷达',
     custom: '自定义兴趣观察员',
   }
@@ -572,13 +664,19 @@ function interestSourceDisplayLabel(source: InterestSource) {
   return source.title
 }
 
+const musicAuthorizationLoadingSteps = [
+  '小钳正在确认授权范围...',
+  '小钳正在整理你常听的歌手...',
+  '小钳正在把音乐偏好夹进记忆里...',
+]
+
 function MusicAuthorizationCard({
   status,
   disabled,
   onAuthorize,
   onDecline,
 }: {
-  status: 'pending' | 'authorized' | 'declined'
+  status: 'pending' | 'loading' | 'authorized' | 'declined'
   disabled: boolean
   onAuthorize: () => void
   onDecline: () => void
@@ -595,9 +693,11 @@ function MusicAuthorizationCard({
         <span className="rounded bg-white px-2 py-1 text-xs text-qq-700">
           {status === 'authorized'
             ? '已授权'
-            : status === 'declined'
-              ? '未授权'
-              : '需确认'}
+            : status === 'loading'
+              ? '授权中'
+              : status === 'declined'
+                ? '未授权'
+                : '需确认'}
         </span>
       </div>
       <div className="mt-3 grid gap-2 text-xs leading-5 text-ink-600">
@@ -605,6 +705,22 @@ function MusicAuthorizationCard({
         <p>不会读取：私密评论、聊天记录、支付信息。</p>
         <p>用途：音乐提醒、兴趣日记素材、龙虾空间动态草稿、兴趣成就。</p>
       </div>
+      {status === 'loading' ? (
+        <div className="mt-4 rounded-lg border border-qq-100 bg-white/80 px-3 py-3">
+          <div className="flex items-center gap-2 text-xs font-semibold text-qq-700">
+            <Sparkles className="h-4 w-4 animate-pulse" />
+            小钳正在处理授权
+          </div>
+          <div className="mt-3 grid gap-2">
+            {musicAuthorizationLoadingSteps.map((step) => (
+              <div className="flex items-center gap-2 text-xs leading-5 text-ink-600" key={step}>
+                <span className="h-1.5 w-1.5 rounded-full bg-qq-500 animate-pulse" />
+                {step}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
       {status === 'pending' ? (
         <div className="mt-4 flex flex-wrap gap-2">
           <button
@@ -625,6 +741,119 @@ function MusicAuthorizationCard({
             暂时不用
           </button>
         </div>
+      ) : null}
+    </div>
+  )
+}
+
+function MusicSkillSuggestionCard({
+  title,
+  summary,
+  skills,
+  status = 'idle',
+  steps = [],
+  successMessage,
+  disabled,
+  onInstall,
+  onTalkMusic,
+  onExploreFeatures,
+}: {
+  title: string
+  summary: string
+  skills: string[]
+  status?: 'idle' | 'installing' | 'installed'
+  steps?: string[]
+  successMessage?: string
+  disabled: boolean
+  onInstall: () => void
+  onTalkMusic: () => void
+  onExploreFeatures: () => void
+}) {
+  return (
+    <div className="mt-3 rounded-lg border border-fuchsia-100 bg-fuchsia-50 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-ink-900">{title}</p>
+          <p className="mt-1 text-xs leading-5 text-fuchsia-700">{summary}</p>
+        </div>
+        <span className="rounded bg-white px-2 py-1 text-xs font-semibold text-fuchsia-700">
+          OpenClaw skill
+        </span>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        {skills.map((skill) => (
+          <div className="flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-ink-700" key={skill}>
+            <Music className="h-3.5 w-3.5 text-fuchsia-600" />
+            {skill}
+          </div>
+        ))}
+      </div>
+
+      {status === 'installing' ? (
+        <div className="mt-4 rounded-lg border border-fuchsia-100 bg-white/80 px-3 py-3">
+          <div className="flex items-center gap-2 text-xs font-semibold text-fuchsia-700">
+            <Sparkles className="h-4 w-4 animate-pulse" />
+            正在安装音乐技能
+          </div>
+          <div className="mt-3 grid gap-2">
+            {steps.map((step) => (
+              <div className="flex items-center gap-2 text-xs leading-5 text-ink-600" key={step}>
+                <span className="h-1.5 w-1.5 rounded-full bg-fuchsia-500 animate-pulse" />
+                {step}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {status === 'installed' ? (
+        <div className="mt-4 rounded-lg bg-white px-3 py-3">
+          <div className="border-t border-fuchsia-100 pt-3">
+            <p className="text-xs font-semibold text-ink-700">
+              接下来可以这样用
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                className="inline-flex items-center gap-2 rounded-lg bg-fuchsia-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-fuchsia-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                type="button"
+                disabled={disabled}
+                onClick={onTalkMusic}
+              >
+                <MessageSquare className="h-3.5 w-3.5" />
+                继续聊音乐话题
+              </button>
+              <button
+                className="inline-flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-fuchsia-700 ring-1 ring-fuchsia-100 transition hover:bg-fuchsia-50 disabled:cursor-not-allowed disabled:text-slate-300 disabled:ring-slate-100"
+                type="button"
+                disabled={disabled}
+                onClick={onExploreFeatures}
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                探索新功能
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {status === 'installed' && successMessage ? (
+        <div className="sr-only">
+          <p className="whitespace-pre-line text-xs leading-5 text-ink-700">
+            {successMessage}
+          </p>
+        </div>
+      ) : null}
+
+      {status === 'idle' ? (
+        <button
+          className="mt-4 inline-flex items-center gap-2 rounded-lg bg-fuchsia-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-fuchsia-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+          type="button"
+          disabled={disabled}
+          onClick={onInstall}
+        >
+          <Check className="h-3.5 w-3.5" />
+          安装音乐技能
+        </button>
       ) : null}
     </div>
   )
@@ -1123,63 +1352,79 @@ function DiaryCard({
 }) {
   const [imageRequested, setImageRequested] = useState(false)
   const canGenerateImage = !entry.image && !imageRequested && onGenerateImage
+  const imageUrl = entry.image?.url?.trim()
+  const hasImage = Boolean(imageUrl)
+  const imageIsFallback = entry.image?.source === 'local-fallback'
 
   return (
     <div className="mt-3 overflow-hidden rounded-lg border border-lobster-100 bg-white shadow-sm">
-      {entry.image ? (
-        <div className="bg-ink-900">
-          <img
-            alt={entry.title}
-            className="h-auto w-full object-cover"
-            src={entry.image.url}
-          />
+      <div className="grid gap-0 md:grid-cols-[minmax(180px,0.9fr)_minmax(0,1.1fr)]">
+        <div className="relative min-h-56 bg-[#fff2dd]">
+          {hasImage ? (
+            <img
+              alt={entry.title}
+              className="h-full min-h-56 w-full object-cover"
+              src={imageUrl}
+            />
+          ) : (
+            <div className="flex h-full min-h-56 flex-col items-center justify-center gap-3 px-5 text-center text-lobster-700">
+              <LobsterAvatar size="lg" mood="happy" animated />
+              <p className="text-sm font-semibold">小钳还在画图中...</p>
+              {canGenerateImage ? (
+                <button
+                  className="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-lobster-700 ring-1 ring-lobster-100 transition hover:bg-lobster-50"
+                  type="button"
+                  onClick={() => {
+                    setImageRequested(true)
+                    onGenerateImage?.()
+                  }}
+                >
+                  <ImageIcon className="h-3.5 w-3.5" />
+                  生成日记图片
+                </button>
+              ) : null}
+            </div>
+          )}
+          {imageIsFallback ? (
+            <span className="absolute left-3 top-3 rounded bg-white/90 px-2 py-1 text-xs font-semibold text-lobster-700 shadow-sm">
+              预设 Q 版图
+            </span>
+          ) : null}
         </div>
-      ) : null}
-      <div className="bg-[#fff7e8] px-4 py-4">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold text-ink-900">{entry.title}</p>
-            <p className="mt-1 text-xs text-ink-500">
-              {new Date(entry.createdAt).toLocaleDateString()} · {entry.source}
+        <div>
+          <div className="bg-[#fff7e8] px-4 py-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-ink-900">{entry.title}</p>
+                <p className="mt-1 text-xs text-ink-500">
+                  {new Date(entry.createdAt).toLocaleDateString()} · {entry.source}
+                </p>
+              </div>
+              <LobsterAvatar size="sm" mood="happy" animated />
+            </div>
+            <p className="mt-4 rounded-lg bg-white/80 px-3 py-3 text-sm font-semibold leading-6 text-lobster-700">
+              {entry.quote}
             </p>
+            {imageRequested && !hasImage ? (
+              <p className="mt-3 text-xs text-ink-500">小钳还在画图中...</p>
+            ) : null}
           </div>
-          <LobsterAvatar size="sm" mood="happy" animated />
-        </div>
-        <p className="mt-4 rounded-lg bg-white/80 px-3 py-3 text-sm font-semibold leading-6 text-lobster-700">
-          {entry.quote}
-        </p>
-        {canGenerateImage ? (
-          <button
-            className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-lobster-700 ring-1 ring-lobster-100 transition hover:bg-lobster-50"
-            type="button"
-            onClick={() => {
-              setImageRequested(true)
-              onGenerateImage?.()
-            }}
-          >
-            <ImageIcon className="h-3.5 w-3.5" />
-            生成日记图片
-          </button>
-        ) : null}
-        {imageRequested && !entry.image ? (
-          <p className="mt-3 text-xs text-ink-500">日记图片生成中...</p>
-        ) : null}
-      </div>
-      <div className="px-4 py-4">
-        <p className="whitespace-pre-line text-sm leading-6 text-ink-800">
-          {entry.text}
-        </p>
-        <div className="mt-4 rounded-lg border border-qq-100 bg-qq-50 px-3 py-3">
-          <p className="text-xs font-semibold text-qq-700">今日成就</p>
-          <p className="mt-1 text-sm leading-6 text-ink-800">
-            {entry.todayAchievement}
-          </p>
+          <div className="px-4 py-4">
+            <p className="whitespace-pre-line text-sm leading-6 text-ink-800">
+              {entry.text}
+            </p>
+            <div className="mt-4 rounded-lg border border-qq-100 bg-qq-50 px-3 py-3">
+              <p className="text-xs font-semibold text-qq-700">今日成就</p>
+              <p className="mt-1 text-sm leading-6 text-ink-800">
+                {entry.todayAchievement}
+              </p>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   )
 }
-
 function SpacePostCard({
   post,
   compact,
@@ -1239,7 +1484,7 @@ function SpacePostCard({
             </div>
           </div>
           <span className="rounded bg-white px-2 py-1 text-xs text-qq-700">
-            {previewRequired ? '用户确认后发布' : '小龙虾发布'}
+            小龙虾发布
           </span>
         </div>
       </div>
@@ -1254,9 +1499,7 @@ function SpacePostCard({
                 来源类型：{interestSourceTypeLabel(sourceType)} · {sourceLabel}
               </p>
             ) : null}
-            {previewRequired ? (
-              <p>发布规则：用户确认后发布，分享前已脱敏。</p>
-            ) : null}
+            {previewRequired ? <p>发布规则：已自动发布，分享前已脱敏。</p> : null}
           </div>
         ) : null}
         <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-ink-500">
@@ -1403,6 +1646,7 @@ export function LobsterChatView() {
     },
   )
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const draftInputRef = useRef<HTMLTextAreaElement | null>(null)
   const lobsterProfile = useLobsterStore((state) => state.lobsterProfile)
   const chatLines = useLobsterStore((state) => state.lobsterChatLines)
   const sending = useLobsterStore((state) => state.lobsterChatBusy)
@@ -1413,6 +1657,9 @@ export function LobsterChatView() {
   const diaryEntries = useLobsterStore((state) => state.diaryEntries)
   const spacePosts = useLobsterStore((state) => state.spacePosts)
   const appView = useLobsterStore((state) => state.appView)
+  const pendingSpaceReplyCount = useLobsterStore(
+    (state) => state.demoRuntimeState.pendingSpaceReplyCount,
+  )
   const activeAchievementMoment = useLobsterStore(
     (state) => state.achievementMomentQueue[0],
   )
@@ -1463,14 +1710,12 @@ export function LobsterChatView() {
   const declineMockQqMusicAuthorization = useLobsterStore(
     (state) => state.declineMockQqMusicAuthorization,
   )
+  const installMusicSkills = useLobsterStore((state) => state.installMusicSkills)
   const showMusicInterestReminder = useLobsterStore(
     (state) => state.showMusicInterestReminder,
   )
   const showInterestSpacePreview = useLobsterStore(
     (state) => state.showInterestSpacePreview,
-  )
-  const generateInterestSpacePostPreview = useLobsterStore(
-    (state) => state.generateInterestSpacePostPreview,
   )
   const publishInterestSpacePostPreview = useLobsterStore(
     (state) => state.publishInterestSpacePostPreview,
@@ -1486,6 +1731,9 @@ export function LobsterChatView() {
   )
   const editInterestMemory = useLobsterStore(
     (state) => state.editInterestMemory,
+  )
+  const pendingInterestEdit = useLobsterStore(
+    (state) => state.pendingInterestEdit,
   )
   const deleteInterestMemory = useLobsterStore(
     (state) => state.deleteInterestMemory,
@@ -1557,6 +1805,9 @@ export function LobsterChatView() {
   const selectedAchievementUnlocked = selectedAchievement
     ? unlockedAchievementKeys.has(selectedAchievement.key)
     : false
+  const selectedAchievementExperienceDraft = selectedAchievement
+    ? achievementExperienceDrafts[selectedAchievement.key]
+    : undefined
   const equippedAccessory = equippedReward?.title ?? '还没佩戴挂饰'
   const moodLine = latestAchievement
     ? `刚刚点亮「${latestAchievement.title}」`
@@ -1571,11 +1822,16 @@ export function LobsterChatView() {
   ]
   const activeRightPanelTab =
     rightPanelTab === 'diary' && !diaryUnlocked ? 'achievements' : rightPanelTab
+  const latestSpacePostId = spacePosts[0]?.id
   const effectiveSelectedSpacePostId =
-    selectedSpacePostId &&
+    appView === 'lobster_space' &&
+    latestSpacePostId &&
+    selectedSpacePostId !== latestSpacePostId
+      ? latestSpacePostId
+      : selectedSpacePostId &&
     spacePosts.some((post) => post.id === selectedSpacePostId)
       ? selectedSpacePostId
-      : spacePosts[0]?.id
+      : latestSpacePostId
   const selectedSpacePost =
     spacePosts.find((post) => post.id === effectiveSelectedSpacePostId) ??
     spacePosts[0]
@@ -1597,6 +1853,22 @@ export function LobsterChatView() {
     await sendLobsterChatMessage(content)
   }
 
+  function prefillDraft(content: string) {
+    setDraft(content)
+
+    window.requestAnimationFrame(() => {
+      const input = draftInputRef.current
+      input?.focus()
+      input?.setSelectionRange(content.length, content.length)
+    })
+  }
+
+  function prefillCapabilityDraft(capability: unknown, fallback: string) {
+    const content =
+      typeof capability === 'string' ? capabilityDrafts[capability] : undefined
+    prefillDraft(content ?? fallback)
+  }
+
   function equipAccessory(rewardId: string) {
     setEquippedAccessoryId(rewardId)
 
@@ -1611,7 +1883,7 @@ export function LobsterChatView() {
     if (suggestion.action === 'send_message') {
       const content =
         typeof payload.content === 'string' ? payload.content : suggestion.label
-      void sendLobsterChatMessage(content)
+      prefillDraft(content)
       return
     }
 
@@ -1634,20 +1906,32 @@ export function LobsterChatView() {
       return
     }
 
+    const capability = payload.capability
+
+    if (capability === 'request_music_authorization') {
+      prefillDraft('小钳，我确认授权 QQ 音乐')
+      return
+    }
+
+    if (
+      capability === 'reply_draft' ||
+      capability === 'work_log' ||
+      capability === 'space_post' ||
+      capability === 'space_comment' ||
+      capability === 'interest_memory' ||
+      capability === 'interest_music_reminder' ||
+      capability === 'interest_space_preview' ||
+      capability === 'interest_community'
+    ) {
+      prefillCapabilityDraft(capability, suggestion.label)
+      return
+    }
+
     if (
       payload.capability === 'summarize_group' ||
       payload.capability === 'summarize_group_messages'
     ) {
-      void saveGroupPermissions(
-        {
-          summarizeGroup: true,
-          collectMentions: true,
-          draftReply: true,
-          diaryMaterial: true,
-          groupId: conversations[0]?.id ?? 'group-ai-camp',
-        },
-        [conversations[0]?.id ?? 'group-ai-camp'],
-      )
+      requestGroupPermissions()
       return
     }
 
@@ -1713,11 +1997,19 @@ export function LobsterChatView() {
 
     if (payload.capability === 'diary_image') {
       void generateHiddenDiaryImage()
+      return
+    }
+
+    if (payload.capability === 'open_hidden_diary') {
+      void openHiddenDiary()
     }
   }
 
   function renderLineSuggestions(line: LobsterChatLine) {
-    const suggestions = line.suggestions?.slice(0, 3) ?? []
+    const suggestions =
+      line.suggestions
+        ?.filter((suggestion) => !isLegacyInterestSpacePublishSuggestion(suggestion))
+        .slice(0, 3) ?? []
 
     if (suggestions.length === 0) {
       return null
@@ -1816,9 +2108,28 @@ export function LobsterChatView() {
       return (
         <MusicAuthorizationCard
           status={line.card.status}
-          disabled={sending}
+          disabled={sending || line.card.status === 'loading'}
           onAuthorize={() => void authorizeMockQqMusic()}
           onDecline={declineMockQqMusicAuthorization}
+        />
+      )
+    }
+
+    if (line.card.type === 'music_skill_suggestion_card') {
+      return (
+        <MusicSkillSuggestionCard
+          title={line.card.title}
+          summary={line.card.summary}
+          skills={line.card.skills}
+          status={line.card.status}
+          steps={line.card.steps}
+          successMessage={line.card.successMessage}
+          disabled={sending || line.card.status === 'installing'}
+          onInstall={() => void installMusicSkills()}
+          onTalkMusic={() =>
+            prefillDraft('小钳，最近我喜欢的歌手有什么新动态？')
+          }
+          onExploreFeatures={() => prefillDraft('小钳，给我讲讲最近的音乐动态')}
         />
       )
     }
@@ -1845,15 +2156,14 @@ export function LobsterChatView() {
       )
     }
 
-    if (
-      line.card.type === 'interest_reminder' ||
-      line.card.type === 'interest_community'
-    ) {
+    if (line.card.type === 'interest_community') {
       return (
         <InterestNarrativeCard
           card={line.card}
           onFavoriteCommunity={saveInterestCommunityCandidate}
-          onGenerateSpacePost={generateInterestSpacePostPreview}
+          onGenerateSpacePost={() =>
+            prefillDraft('小钳，把音乐动态生成一条空间动态')
+          }
         />
       )
     }
@@ -1890,14 +2200,21 @@ export function LobsterChatView() {
               </p>
             </div>
           </div>
-          <button
-            className="inline-flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-qq-700 ring-1 ring-qq-100 transition hover:bg-qq-50"
-            type="button"
-            onClick={openLobsterChat}
-          >
-            <MessageSquare className="h-3.5 w-3.5" />
-            私聊
-          </button>
+          <div className="flex items-center gap-2">
+            {pendingSpaceReplyCount > 0 ? (
+              <span className="rounded-full bg-lobster-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm">
+                你有 {pendingSpaceReplyCount} 条新回复
+              </span>
+            ) : null}
+            <button
+              className="inline-flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-qq-700 ring-1 ring-qq-100 transition hover:bg-qq-50"
+              type="button"
+              onClick={openLobsterChat}
+            >
+              <MessageSquare className="h-3.5 w-3.5" />
+              私聊
+            </button>
+          </div>
         </header>
 
         <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-6 py-6">
@@ -2036,6 +2353,7 @@ export function LobsterChatView() {
               </button>
               <button
                 className={[
+                  'relative',
                   'grid h-11 w-11 place-items-center rounded-lg transition',
                   appView === 'lobster_space'
                     ? 'bg-white text-qq-600 shadow-sm'
@@ -2047,6 +2365,11 @@ export function LobsterChatView() {
                 onClick={() => void openLobsterSpace()}
               >
                 <Share2 className="h-5 w-5" />
+                {pendingSpaceReplyCount > 0 ? (
+                  <span className="absolute -right-1 -top-1 grid min-h-5 min-w-5 place-items-center rounded-full bg-lobster-500 px-1 text-[10px] font-bold leading-none text-white ring-2 ring-[#e8f2ff]">
+                    {pendingSpaceReplyCount}
+                  </span>
+                ) : null}
               </button>
               <button
                 className="grid h-11 w-11 place-items-center rounded-lg text-ink-500 transition hover:bg-white hover:text-qq-600"
@@ -2188,29 +2511,33 @@ export function LobsterChatView() {
               </span>
             </div>
 
-            <div className="flex gap-3 text-left">
-              <LobsterAvatar size="sm" mood="happy" />
-              <div className="max-w-[72%] space-y-1">
-                <div className="flex items-center gap-2 text-xs text-ink-500">
-                  <span>{lobsterProfile.name}</span>
-                  <span>刚刚</span>
+            {chatLines.length === 0 ? (
+              <>
+                <div className="flex gap-3 text-left">
+                  <LobsterAvatar size="sm" mood="happy" />
+                  <div className="max-w-[72%] space-y-1">
+                    <div className="flex items-center gap-2 text-xs text-ink-500">
+                      <span>{lobsterProfile.name}</span>
+                      <span>刚刚</span>
+                    </div>
+                    <div className="rounded-lg border border-lobster-100 bg-white px-4 py-3 text-sm leading-6 text-ink-900 shadow-sm">
+                      {lobsterProfile.userCallsign}，我现在还没有看你的群消息。
+                      先从这里开始聊天；等你愿意的时候，我会一步步申请权限，再帮你整理群聊和写日记。
+                    </div>
+                  </div>
                 </div>
-                <div className="rounded-lg border border-lobster-100 bg-white px-4 py-3 text-sm leading-6 text-ink-900 shadow-sm">
-                  {lobsterProfile.userCallsign}，我现在还没有看你的群消息。
-                  先从这里开始聊天；等你愿意的时候，我会一步步申请权限，再帮你整理群聊和写日记。
-                </div>
-              </div>
-            </div>
 
-            <div className="flex gap-3 text-left">
-              <LobsterAvatar size="sm" mood="curious" />
-              <div className="max-w-[72%] rounded-lg border border-qq-100 bg-qq-50 px-4 py-3 text-sm leading-6 text-qq-700">
-                {latestAchievement
-                  ? `刚点亮「${latestAchievement.title}」。`
-                  : '成就墙还在等第一束光。'}
-                已点亮的徽章会留在右侧墙面里。
-              </div>
-            </div>
+                <div className="flex gap-3 text-left">
+                  <LobsterAvatar size="sm" mood="curious" />
+                  <div className="max-w-[72%] rounded-lg border border-qq-100 bg-qq-50 px-4 py-3 text-sm leading-6 text-qq-700">
+                    {latestAchievement
+                      ? `刚点亮「${latestAchievement.title}」。`
+                      : '成就墙还在等第一束光。'}
+                    已点亮的徽章会留在右侧墙面里。
+                  </div>
+                </div>
+              </>
+            ) : null}
 
             {chatLines.map((line) =>
               line.role === 'user' ? (
@@ -2219,7 +2546,7 @@ export function LobsterChatView() {
                   key={line.id}
                 >
                   <Avatar label={currentUser.avatar} active />
-                  <div className="max-w-[72%] rounded-lg bg-qq-500 px-4 py-3 text-sm leading-6 text-white shadow-sm">
+                  <div className="max-w-[72%] whitespace-pre-line rounded-lg bg-qq-500 px-4 py-3 text-sm leading-6 text-white shadow-sm">
                     {line.content}
                   </div>
                 </div>
@@ -2227,8 +2554,10 @@ export function LobsterChatView() {
                 <div className="flex gap-3 text-left" key={line.id}>
                   <LobsterAvatar size="sm" mood="happy" />
                   <div className="max-w-[72%] space-y-1">
-                    <div className="rounded-lg border border-lobster-100 bg-white px-4 py-3 text-sm leading-6 text-ink-900 shadow-sm">
-                      {line.content || '我正在组织语言...'}
+                    <div className="whitespace-pre-line rounded-lg border border-lobster-100 bg-white px-4 py-3 text-sm leading-6 text-ink-900 shadow-sm">
+                      {line.content
+                        ? formatIntroSelfIntroduction(line.content)
+                        : '我正在组织语言...'}
                     </div>
                     {renderLineCard(line)}
                     {renderLineSuggestions(line)}
@@ -2269,8 +2598,13 @@ export function LobsterChatView() {
             </div>
             <div className="mt-3 flex items-end gap-3">
               <textarea
+                ref={draftInputRef}
                 className="h-20 min-h-20 flex-1 resize-none rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition placeholder:text-ink-500 focus:border-qq-500 focus:bg-white focus:ring-4 focus:ring-qq-100"
-                placeholder="和小龙虾说句话"
+                placeholder={
+                  pendingInterestEdit
+                    ? '输入修改信息，比如：林俊杰、周杰伦、日摇，城市深圳，只提醒演唱会'
+                    : '和小龙虾说句话'
+                }
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 onKeyDown={(event) => {
@@ -2317,7 +2651,7 @@ export function LobsterChatView() {
                 </div>
               </div>
 
-              <div className="mt-4 flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-3">
+              <div className="mt-4 flex w-full items-center justify-between gap-3 rounded-lg bg-white px-3 py-3">
                 <div className="min-w-0">
                   <p className="text-xs text-ink-500">当前佩戴</p>
                   <p className="mt-1 truncate text-sm font-semibold text-ink-900">
@@ -2368,13 +2702,19 @@ export function LobsterChatView() {
                   </div>
 
                   <div className="mt-3 grid grid-cols-5 gap-2 rounded-lg bg-slate-50 p-2">
-                    {visibleAchievements.map((achievement) => {
+                    {visibleAchievements.map((achievement, achievementIndex) => {
                       const unlocked = unlockedAchievementKeys.has(achievement.key)
                       const label =
                         achievement.hidden && !unlocked ? '???' : achievement.title
                       const tooltip = unlocked
                         ? achievement.description
                         : achievement.hint
+                      const tooltipAlignmentClass =
+                        achievementIndex % 5 === 0
+                          ? 'left-0 translate-x-0'
+                          : achievementIndex % 5 === 4
+                            ? 'right-0 translate-x-0'
+                            : 'left-1/2 -translate-x-1/2'
                       return (
                         <button
                           className={[
@@ -2402,7 +2742,10 @@ export function LobsterChatView() {
                             {label}
                           </span>
                           <span
-                            className="pointer-events-none absolute left-1/2 top-full z-40 mt-1 w-40 -translate-x-1/2 rounded-md border border-slate-200 bg-ink-900 px-2.5 py-1.5 text-left text-xs leading-5 text-white opacity-0 shadow-lg transition-opacity duration-75 group-hover:opacity-100 group-focus-visible:opacity-100"
+                            className={[
+                              'pointer-events-none absolute top-full z-40 mt-1 w-40 rounded-md border border-slate-200 bg-ink-900 px-2.5 py-1.5 text-left text-xs leading-5 text-white opacity-0 shadow-lg transition-opacity duration-75 group-hover:opacity-100 group-focus-visible:opacity-100',
+                              tooltipAlignmentClass,
+                            ].join(' ')}
                             role="tooltip"
                           >
                             {tooltip}
@@ -2443,6 +2786,26 @@ export function LobsterChatView() {
                       <p className="mt-2 text-xs leading-5 text-ink-500">
                         奖励：{selectedAchievement.reward}
                       </p>
+                      {selectedAchievementUnlocked ? (
+                        <div className="mt-3 flex flex-wrap items-center gap-2">
+                          <span className="inline-flex items-center gap-1 rounded bg-white px-2 py-1 text-xs font-semibold text-ink-500">
+                            <Share2 className="h-3.5 w-3.5" />
+                            分享
+                          </span>
+                        </div>
+                      ) : selectedAchievementExperienceDraft &&
+                        !selectedAchievement.hidden ? (
+                        <button
+                          className="mt-3 inline-flex items-center gap-1.5 rounded bg-qq-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-qq-700"
+                          type="button"
+                          onClick={() =>
+                            prefillDraft(selectedAchievementExperienceDraft)
+                          }
+                        >
+                          <Sparkles className="h-3.5 w-3.5" />
+                          去体验
+                        </button>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
@@ -2461,7 +2824,7 @@ export function LobsterChatView() {
                       {unlockedRewards.length}/{lobsterRewards.length}
                     </span>
                   </div>
-                  <div className="mt-3 space-y-2">
+                  <div className="mt-3 grid grid-cols-2 gap-2">
                     {lobsterRewards.map((reward) => {
                       const unlocked = isRewardUnlocked(
                         reward,
@@ -2471,7 +2834,7 @@ export function LobsterChatView() {
                       return (
                         <button
                           className={[
-                            'group relative w-full rounded-lg border px-3 py-3 text-left transition hover:z-30 focus-visible:z-30',
+                            'group relative flex min-h-24 w-full flex-col rounded-lg border px-3 py-3 text-left transition hover:z-30 focus-visible:z-30',
                             unlocked && equipped
                               ? 'border-qq-300 bg-qq-50 text-ink-900 ring-2 ring-qq-100'
                               : '',
@@ -2480,7 +2843,7 @@ export function LobsterChatView() {
                               : '',
                             unlocked
                               ? 'cursor-pointer'
-                              : 'cursor-not-allowed border-slate-200 bg-slate-50 text-ink-400 opacity-70 grayscale',
+                              : 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400 grayscale',
                           ].join(' ')}
                           key={reward.id}
                           type="button"
@@ -2488,7 +2851,7 @@ export function LobsterChatView() {
                           aria-label={`${reward.title}，${reward.description}`}
                           onClick={() => equipAccessory(reward.id)}
                         >
-                          <div className="flex items-start gap-3">
+                          <div className="flex h-full flex-col gap-2">
                             <AccessoryPreview
                               rewardId={reward.id}
                               selected={equipped}
@@ -2501,12 +2864,12 @@ export function LobsterChatView() {
                             </div>
                             <span
                               className={[
-                                'shrink-0 rounded px-2 py-1 text-xs font-semibold',
+                                'self-start rounded px-2 py-1 text-xs font-semibold',
                                 unlocked && equipped
                                   ? 'bg-qq-100 text-qq-700'
                                   : unlocked
                                   ? 'bg-white text-qq-700'
-                                  : 'bg-white text-ink-400',
+                                  : 'bg-slate-200 text-slate-500',
                               ].join(' ')}
                             >
                               {equipped ? '已佩戴' : unlocked ? '使用' : '未获得'}
@@ -2657,7 +3020,7 @@ export function LobsterChatView() {
                               <button
                                 className="rounded-lg bg-qq-50 px-3 py-1.5 text-xs font-semibold text-qq-700 transition hover:bg-qq-100"
                                 type="button"
-                                onClick={showInterestMemories}
+                                onClick={() => void showInterestMemories()}
                               >
                                 查看
                               </button>
@@ -2691,7 +3054,7 @@ export function LobsterChatView() {
                     <button
                       className="mt-3 w-full rounded-lg bg-qq-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-qq-600"
                       type="button"
-                      onClick={showInterestMemories}
+                      onClick={() => void showInterestMemories()}
                     >
                       先查看兴趣状态
                     </button>

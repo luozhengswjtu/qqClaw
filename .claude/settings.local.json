@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git reset *)",
+      "Bash(python -c \"import openpyxl; print\\('openpyxl ok'\\)\")",
+      "Bash(node -e \"try{require\\('xlsx'\\);console.log\\('xlsx ok'\\)}catch\\(e\\){console.log\\('no xlsx'\\)}\")",
+      "Bash(node -e \"try{require\\('exceljs'\\);console.log\\('exceljs ok'\\)}catch\\(e\\){console.log\\('no exceljs'\\)}\")",
+      "Bash(node *)",
+      "Bash(cd /tmp)",
+      "Bash(rm -rf lobster_xlsx_check)",
+      "Bash(mkdir lobster_xlsx_check)",
+      "Bash(powershell -NoProfile -Command \"Expand-Archive -Path 'E:/sumoAndQt/QQClaw/lobster-image-prompts.xlsx' -DestinationPath '/tmp/lobster_xlsx_check' -Force\")",
+      "Read(//tmp/lobster_xlsx_check/xl/**)",
+      "Bash(cp \"E:/sumoAndQt/QQClaw/lobster-image-prompts.xlsx\" /tmp/lobster.zip)",
+      "Bash(rm -rf /tmp/lobster_xlsx_check)",
+      "Bash(powershell -NoProfile -Command \"Expand-Archive -Path '/tmp/lobster.zip' -DestinationPath '/tmp/lobster_xlsx_check' -Force\")",
+      "Bash(cp \"E:/sumoAndQt/QQClaw/lobster-image-prompts.xlsx\" \"E:/sumoAndQt/QQClaw/.claude/scripts/_check.zip\")",
+      "Bash(rm -rf \"E:/sumoAndQt/QQClaw/.claude/scripts/_check_out\")",
+      "Bash(powershell -NoProfile -Command \"Expand-Archive -Path 'E:/sumoAndQt/QQClaw/.claude/scripts/_check.zip' -DestinationPath 'E:/sumoAndQt/QQClaw/.claude/scripts/_check_out' -Force\")",
+      "Bash(grep -iE \"lobster|xlsx|\\\\.zip$|_check\")"
+    ]
+  }
+}

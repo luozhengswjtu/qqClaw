@@ -25,7 +25,7 @@ export const defaultLobsterProfile: LobsterProfile = {
   id: 'lobster-xiaoqian',
   name: '小钳',
   userCallsign: '队长',
-  personality: 'quiet_observer',
+  personality: 'team_spark',
   interests: ['music'],
   mood: 'curious',
   level: 1,
@@ -37,29 +37,14 @@ export const personalityOptions: Array<{
   sample: string
 }> = [
   {
-    id: 'sharp_reliable',
-    label: '毒舌但靠谱',
-    sample: '我会吐槽，但结论先给你。',
-  },
-  {
-    id: 'gentle_companion',
-    label: '温柔陪伴',
-    sample: '慢慢来，我陪你把消息理顺。',
-  },
-  {
-    id: 'quiet_observer',
-    label: '社恐观察',
-    sample: '我不吵，但会默默捞重点。',
-  },
-  {
-    id: 'cool_secretary',
-    label: '高冷秘书',
-    sample: '无关信息已过滤，重点如下。',
-  },
-  {
     id: 'team_spark',
     label: '热血队友',
     sample: '冲，今天也把群消息拿下。',
+  },
+  {
+    id: 'cool_secretary',
+    label: '清醒参谋',
+    sample: '我会先理清重点，再陪你做决定。',
   },
 ]
 
@@ -464,6 +449,7 @@ export const lobsterRewards: LobsterReward[] = [
     title: '小红旗挂饰',
     description: '完成第一次聊天后解锁，后续可展示在小龙虾形象旁。',
     requiredCheckIns: 1,
+    requiredCheckInId: 'first_lobster_chat',
     unlocked: false,
   },
   {
@@ -471,6 +457,7 @@ export const lobsterRewards: LobsterReward[] = [
     title: '亮晶晶虾壳',
     description: '生成第一张群聊总结卡后，小龙虾资料卡会点亮第一枚徽章。',
     requiredCheckIns: 2,
+    requiredCheckInId: 'first_group_permission',
     unlocked: false,
   },
   {
@@ -478,6 +465,7 @@ export const lobsterRewards: LobsterReward[] = [
     title: '透明工作簿',
     description: '第一次查看工作记录后解锁。',
     requiredCheckIns: 3,
+    requiredCheckInId: 'first_view_work_log',
     unlocked: false,
   },
   {
@@ -485,6 +473,7 @@ export const lobsterRewards: LobsterReward[] = [
     title: '龙虾空间头图',
     description: '第一次由小龙虾主动发布空间动态后解锁。',
     requiredCheckIns: 4,
+    requiredCheckInId: 'first_space_post',
     unlocked: false,
   },
   {
@@ -492,6 +481,7 @@ export const lobsterRewards: LobsterReward[] = [
     title: '星星挂饰',
     description: '探索完首批成长事件后解锁。',
     requiredCheckIns: 5,
+    requiredCheckInId: 'first_space_comment',
     unlocked: false,
   },
   {
@@ -604,11 +594,11 @@ export const mockAchievements: AchievementCatalogItem[] = [
     key: 'first_interest_space_post',
     id: 'first_interest_space_post',
     title: '同好动态',
-    description: '小龙虾第一次把兴趣内容确认发布进龙虾空间。',
+    description: '小龙虾第一次把兴趣内容发布进龙虾空间。',
     status: 'locked',
     reward: '小音符挂饰',
     hidden: false,
-    hint: '把音乐提醒生成空间动态并确认发布。',
+    hint: '把音乐提醒生成空间动态并自动发布。',
     triggerCheckInId: 'first_interest_space_post',
   },
   {
@@ -641,8 +631,48 @@ export const mockAchievements: AchievementCatalogItem[] = [
       '不急着加入也很好，先蹲一蹲、看一看，也是很聪明的社交方式。',
     status: 'locked',
     reward: '安全距离贴纸',
-    hidden: true,
+    hidden: false,
     hint: '多次收藏同好群，但不急着申请加入。',
     triggerCheckInId: 'safe_distance',
+  },
+  {
+    key: 'captain_rhythm',
+    id: 'captain_rhythm',
+    title: '节奏上线',
+    description: '小龙虾开始适应你的推进节奏，知道什么时候该提醒。',
+    status: 'locked',
+    reward: '节奏徽章',
+    hidden: false,
+    hint: '后续完成连续使用路径后点亮。',
+  },
+  {
+    key: 'source_clear',
+    id: 'source_clear',
+    title: '来源清楚',
+    description: '每次推荐都能说明来源和边界，不把不确定的事说满。',
+    status: 'locked',
+    reward: '透明资料夹',
+    hidden: false,
+    hint: '后续查看多次来源说明后点亮。',
+  },
+  {
+    key: 'ask_before_doing',
+    id: 'ask_before_doing',
+    title: '先问再做',
+    description: '小龙虾学会先确认你的意愿，再继续往下一步走。',
+    status: 'locked',
+    reward: '确认印章',
+    hidden: false,
+    hint: '后续完成多次确认动作后点亮。',
+  },
+  {
+    key: 'daily_partner',
+    id: 'daily_partner',
+    title: '日常搭档',
+    description: '小龙虾成为 QQ 里的稳定小伙伴，陪你记住重要小事。',
+    status: 'locked',
+    reward: '搭档徽章',
+    hidden: false,
+    hint: '后续连续多天互动后点亮。',
   },
 ]

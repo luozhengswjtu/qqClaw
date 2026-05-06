@@ -59,7 +59,16 @@ button:disabled {
     position: relative;
     display: inline-block;
     flex: 0 0 auto;
+    background: url('./assets/lobster/xingxiang3.png') center / contain no-repeat;
     transform-origin: center bottom;
+  }
+
+  .lobster-avatar.h-12.w-12 {
+    background-image: url('./assets/lobster/touxiang.png');
+  }
+
+  .lobster-avatar > span {
+    display: none;
   }
 
   .lobster-body {
@@ -460,4 +469,80 @@ button:disabled {
       )
       scale(0.28);
   }
+}
+
+aside.min-h-0 > .scrollbar-thin > section:first-child {
+  display: grid;
+  gap: 10px;
+  overflow: hidden;
+  padding: 16px;
+  border-color: #bfdbfe;
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 50% 28%, rgba(255, 255, 255, 0.94), transparent 34%),
+    linear-gradient(135deg, #eff8ff 0%, #f8fbff 100%);
+}
+
+aside.min-h-0 > .scrollbar-thin > section:first-child > div:first-child {
+  display: contents;
+}
+
+aside.min-h-0
+  > .scrollbar-thin
+  > section:first-child
+  > div:first-child
+  > div:first-child {
+  display: grid;
+  min-height: 132px;
+  width: 100%;
+  place-items: center;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+aside.min-h-0
+  > .scrollbar-thin
+  > section:first-child
+  > div:first-child
+  > div:nth-child(2) {
+  min-height: 46px;
+  width: 100%;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 9px 12px;
+  box-sizing: border-box;
+}
+
+aside.min-h-0 > .scrollbar-thin > section:first-child .lobster-avatar {
+  height: 132px;
+  width: 132px;
+}
+
+aside.min-h-0 > .scrollbar-thin > section:first-child > div:nth-child(2) {
+  margin-top: 0;
+  display: flex;
+  background: transparent;
+  padding: 10px 12px;
+  box-sizing: border-box;
+}
+
+aside.min-h-0
+  > .scrollbar-thin
+  > section:first-child
+  > div:nth-child(2)
+  > div {
+  min-height: 50px;
+  width: 100%;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  padding: 10px 12px;
+}
+
+aside.min-h-0
+  > .scrollbar-thin
+  > section:first-child
+  > div:nth-child(2)
+  > div
+  + span {
+  display: none;
 }
