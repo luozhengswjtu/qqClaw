@@ -96,7 +96,6 @@ const capabilityDrafts: Record<string, string> = {
 }
 
 const musicTopicDrafts = [
-  '小钳，你已经拿到 QQ 音乐授权了，先从我最近循环最多的几首歌聊起吧',
   '小钳，看看我最近常听的歌和收藏歌单，帮我挑一个今天适合继续聊的音乐话题',
   '小钳，根据我最近听歌的变化，和我聊聊现在最像我心情的一首歌',
   '小钳，结合我喜欢的歌手和最近播放记录，给我找一个可以继续深聊的音乐切入点',
@@ -119,7 +118,6 @@ const achievementExperienceDrafts: Record<string, string> = {
   first_diary_view: '小钳，打开第一条日记',
   first_skill_install: '小钳，帮我安装音乐小技能',
   first_interest_feed_view: '小钳，给我讲讲最近的音乐动态',
-  interest_topic_streak_3: '我最近在听林俊杰、周杰伦和日摇',
 }
 
 function isLegacyInterestSpacePublishSuggestion(suggestion: LobsterSuggestion) {
@@ -1310,20 +1308,18 @@ function DiaryCard({
   const canGenerateImage = !entry.image && !imageRequested && onGenerateImage
   const imageUrl = entry.image?.url?.trim()
   const hasImage = Boolean(imageUrl)
-  const imageIsFallback = entry.image?.source === 'local-fallback'
-
   return (
     <div className="mt-3 overflow-hidden rounded-lg border border-lobster-100 bg-white shadow-sm">
-      <div className="grid gap-0 md:grid-cols-[minmax(180px,0.9fr)_minmax(0,1.1fr)]">
-        <div className="relative min-h-56 bg-[#fff2dd]">
+      <div className="flex flex-col">
+        <div className="relative h-64 bg-[#fff2dd] md:h-72">
           {hasImage ? (
             <img
               alt={entry.title}
-              className="h-full min-h-56 w-full object-cover"
+              className="h-full w-full object-cover"
               src={imageUrl}
             />
           ) : (
-            <div className="flex h-full min-h-56 flex-col items-center justify-center gap-3 px-5 text-center text-lobster-700">
+            <div className="flex h-64 flex-col items-center justify-center gap-3 px-5 text-center text-lobster-700 md:h-72">
               <LobsterAvatar size="lg" mood="happy" animated />
               <p className="text-sm font-semibold">小钳还在画图中...</p>
               {canGenerateImage ? (
@@ -1341,11 +1337,6 @@ function DiaryCard({
               ) : null}
             </div>
           )}
-          {imageIsFallback ? (
-            <span className="absolute left-3 top-3 rounded bg-white/90 px-2 py-1 text-xs font-semibold text-lobster-700 shadow-sm">
-              预设 Q 版图
-            </span>
-          ) : null}
         </div>
         <div>
           <div className="bg-[#fff7e8] px-4 py-4">
@@ -1353,7 +1344,7 @@ function DiaryCard({
               <div>
                 <p className="text-sm font-semibold text-ink-900">{entry.title}</p>
                 <p className="mt-1 text-xs text-ink-500">
-                  {new Date(entry.createdAt).toLocaleDateString()} · {entry.source}
+                  {new Date(entry.createdAt).toLocaleDateString()}
                 </p>
               </div>
               <LobsterAvatar size="sm" mood="happy" animated />
@@ -1584,6 +1575,7 @@ function HiddenDiarySurprise({
 
 export function LobsterChatView() {
   const [draft, setDraft] = useState('')
+  const [diaryPromptDismissed, setDiaryPromptDismissed] = useState(false)
   const [selectedSpacePostId, setSelectedSpacePostId] = useState<string | null>(
     null,
   )
@@ -1616,6 +1608,9 @@ export function LobsterChatView() {
   const appView = useLobsterStore((state) => state.appView)
   const pendingSpaceReplyCount = useLobsterStore(
     (state) => state.demoRuntimeState.pendingSpaceReplyCount,
+  )
+  const pendingMusicReminderCount = useLobsterStore(
+    (state) => state.demoRuntimeState.pendingMusicReminderCount,
   )
   const activeAchievementMoment = useLobsterStore(
     (state) => state.achievementMomentQueue[0],
@@ -1732,7 +1727,6 @@ export function LobsterChatView() {
       [
         'community_saved',
         'first_interest_feed_view',
-        'interest_topic_streak_3',
       ].includes(achievement.key),
     )
   const enabledInterestPersonas = Array.from(
@@ -1781,12 +1775,7 @@ export function LobsterChatView() {
     rightPanelTab === 'diary' && !diaryUnlocked ? 'achievements' : rightPanelTab
   const latestSpacePostId = spacePosts[0]?.id
   const effectiveSelectedSpacePostId =
-    appView === 'lobster_space' &&
-    latestSpacePostId &&
-    selectedSpacePostId !== latestSpacePostId
-      ? latestSpacePostId
-      : selectedSpacePostId &&
-    spacePosts.some((post) => post.id === selectedSpacePostId)
+    selectedSpacePostId && spacePosts.some((post) => post.id === selectedSpacePostId)
       ? selectedSpacePostId
       : latestSpacePostId
   const selectedSpacePost =
@@ -1818,6 +1807,11 @@ export function LobsterChatView() {
       input?.focus()
       input?.setSelectionRange(content.length, content.length)
     })
+  }
+
+  function prefillDiaryRevealDraft() {
+    setDiaryPromptDismissed(true)
+    prefillDraft('看看你写的日记')
   }
 
   function getNextMusicTopicDraftIndex(previousIndex: number | null) {
@@ -2304,10 +2298,10 @@ export function LobsterChatView() {
 
   return (
     <>
-      {diarySurpriseVisible ? (
+      {diarySurpriseVisible && !diaryPromptDismissed ? (
         <HiddenDiarySurprise
           lobsterName={lobsterProfile.name}
-          onOpen={() => void openHiddenDiary()}
+          onOpen={prefillDiaryRevealDraft}
         />
       ) : null}
       {activeAchievementMoment ? (
@@ -2325,6 +2319,7 @@ export function LobsterChatView() {
             <nav className="flex flex-col items-center gap-2">
               <button
                 className={[
+                  'relative',
                   'grid h-11 w-11 place-items-center rounded-lg transition',
                   appView === 'lobster_space'
                     ? 'text-ink-500 hover:bg-white hover:text-qq-600'
@@ -2335,6 +2330,11 @@ export function LobsterChatView() {
                 onClick={openLobsterChat}
               >
                 <MessageSquare className="h-5 w-5" />
+                {pendingMusicReminderCount > 0 ? (
+                  <span className="absolute -right-1 -top-1 grid min-h-5 min-w-5 place-items-center rounded-full bg-lobster-500 px-1 text-[10px] font-bold leading-none text-white ring-2 ring-[#e8f2ff]">
+                    {pendingMusicReminderCount}
+                  </span>
+                ) : null}
               </button>
               <button
                 className={[
@@ -2546,25 +2546,11 @@ export function LobsterChatView() {
                     </div>
                     {renderLineCard(line)}
                     {renderLineSuggestions(line)}
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-ink-500">
-                      <span>
-                        OpenClaw: {line.source ?? '连接中'}
-                      </span>
-                      {line.status ? (
-                        <span
-                          className={[
-                            'rounded bg-white px-2 py-0.5',
-                            line.status === 'fallback'
-                              ? 'text-lobster-600'
-                              : line.status === 'failed'
-                                ? 'text-red-600'
-                                : 'text-ink-500',
-                          ].join(' ')}
-                        >
-                          {chatStatusLabel[line.status]}
-                        </span>
-                      ) : null}
-                    </div>
+                    {line.status === 'failed' ? (
+                      <p className="text-xs text-red-600">
+                        {chatStatusLabel[line.status]}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
               ),

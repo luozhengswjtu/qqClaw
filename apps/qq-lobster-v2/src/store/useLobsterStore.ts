@@ -146,7 +146,10 @@ interface LobsterAppState {
   installMusicSkills: () => Promise<void>
   showMusicInterestReminder: (targetLineId?: string) => Promise<void>
   showInterestSpacePreview: (targetLineId?: string) => Promise<void>
-  showInterestCommunity: (targetLineId?: string) => Promise<void>
+  showInterestCommunity: (
+    targetLineId?: string,
+    interest?: Interest,
+  ) => Promise<void>
   saveInterestCommunityCandidate: () => void
   showInterestMemories: (targetLineId?: string) => Promise<void>
   editInterestMemory: (interest: Interest) => Promise<void>
@@ -169,6 +172,7 @@ type LobsterAction = Pick<
   | 'generateWorkLog'
   | 'generateSpacePost'
   | 'triggerHiddenDiary'
+  | 'openHiddenDiary'
   | 'replyToSpaceComment'
   | 'showInterestMemories'
   | 'requestMockQqMusicAuthorization'
@@ -199,6 +203,7 @@ const initialDemoRuntimeState: DemoRuntimeState = {
   musicPushSent: false,
   behaviorPushSent: false,
   leftChatAt: null,
+  pendingMusicReminderCount: 0,
   pendingSpaceReplyCount: 0,
 }
 
@@ -206,7 +211,7 @@ const diaryPrewarmAccessoryThreshold = 3
 const diaryRevealPromptText =
   '\u6211\u5199\u4e86\u4e00\u7bc7\u65e5\u8bb0\uff0c\u4f60\u8981\u770b\u770b\u4e48'
 const behaviorPushAchievementThreshold = 8
-const musicTopicStreakThreshold = 3
+const musicCommunityRecommendationThreshold = 2
 const accessoryRewardCheckInIds = [
   'first_lobster_chat',
   'first_space_post',
@@ -215,8 +220,17 @@ const accessoryRewardCheckInIds = [
 ]
 const offChatPushDelayMs = 60_000
 let offChatPushTimer: ReturnType<typeof window.setTimeout> | null = null
-const fallbackDiaryImageUrl =
-  'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 640 640%22%3E%3Crect width=%22640%22 height=%22640%22 rx=%2248%22 fill=%22%23fff2dd%22/%3E%3Ccircle cx=%22320%22 cy=%22336%22 r=%22122%22 fill=%22%23ff8a65%22/%3E%3Cellipse cx=%22244%22 cy=%22292%22 rx=%2254%22 ry=%2240%22 fill=%22%23ff7043%22/%3E%3Cellipse cx=%22396%22 cy=%22292%22 rx=%2254%22 ry=%2240%22 fill=%22%23ff7043%22/%3E%3Ccircle cx=%22276%22 cy=%22324%22 r=%2216%22 fill=%22%23222%22/%3E%3Ccircle cx=%22364%22 cy=%22324%22 r=%2216%22 fill=%22%23222%22/%3E%3Cpath d=%22M288 372c18 20 46 20 64 0%22 fill=%22none%22 stroke=%22%23222%22 stroke-width=%2212%22 stroke-linecap=%22round%22/%3E%3Cpath d=%22M206 248 112 180M434 248l94-68%22 fill=%22none%22 stroke=%22%23ff7043%22 stroke-width=%2218%22 stroke-linecap=%22round%22/%3E%3Cpath d=%22M150 156c-18 18-18 48 0 66M490 156c18 18 18 48 0 66%22 fill=%22none%22 stroke=%22%23ff7043%22 stroke-width=%2220%22 stroke-linecap=%22round%22/%3E%3Crect x=%22212%22 y=%22470%22 width=%22216%22 height=%2252%22 rx=%2226%22 fill=%22%23ffffff%22 opacity=%22.82%22/%3E%3Cpath d=%22M260 497h120%22 stroke=%22%23ff7043%22 stroke-width=%2212%22 stroke-linecap=%22round%22/%3E%3C/svg%3E'
+const fallbackDiaryImageUrls = [
+  '/diary-fallbacks/diary-fallback-01.jpg',
+  '/diary-fallbacks/diary-fallback-02.jpg',
+  '/diary-fallbacks/diary-fallback-03.jpg',
+  '/diary-fallbacks/diary-fallback-04.jpg',
+]
+
+function pickFallbackDiaryImageUrl() {
+  const index = Math.floor(Math.random() * fallbackDiaryImageUrls.length)
+  return fallbackDiaryImageUrls[index]
+}
 
 function createInitialDemoRuntimeState(): DemoRuntimeState {
   return { ...initialDemoRuntimeState }
@@ -357,6 +371,7 @@ function applyDemoEvent(
       return {
         ...runtime,
         leftChatAt: null,
+        pendingMusicReminderCount: 0,
       }
     case 'space.comment.created':
       return state.appView === 'lobster_space'
@@ -371,6 +386,20 @@ function applyDemoEvent(
 }
 
 const chatCapabilityRegistry: ChatCapabilityDefinition[] = [
+  {
+    capability: 'open_hidden_diary',
+    label: '看看日记',
+    allowedFromChat: true,
+    requiresConfirmation: false,
+    riskLevel: 'low',
+    reason: '用户明确发送消息要求查看小龙虾写好的隐藏日记。',
+    matchers: [
+      /(看看|查看|打开).*(你写的)?日记/,
+      /看看你写的日记/,
+    ],
+    isAvailable: (state) =>
+      state.diaryTriggered && state.diaryEntries.length > 0 && !state.diaryUnlocked,
+  },
   {
     capability: 'summarize_group_messages',
     label: '总结群消息',
@@ -559,8 +588,8 @@ function createOpenHiddenDiarySuggestion(): LobsterSuggestion {
     id: 'open-hidden-diary',
     label:
       '\u770b\u770b\u4f60\u5199\u7684\u65e5\u8bb0',
-    action: 'run_capability',
-    payload: { capability: 'open_hidden_diary' },
+    action: 'send_message',
+    payload: { content: '\u770b\u770b\u4f60\u5199\u7684\u65e5\u8bb0' },
   }
 }
 
@@ -635,14 +664,6 @@ function consumePendingDiaryRevealPromptOnLine(
     }),
     demoRuntimeState: promptResult.demoRuntimeState,
   }
-}
-
-function completeInterestTopicStreakIfReady(state: LobsterAppState) {
-  return state.demoRuntimeState.musicTalkCount >= musicTopicStreakThreshold
-    ? withCompletedCheckIns(state.completedCheckInIds, [
-        'interest_topic_streak_3',
-      ])
-    : state.completedCheckInIds
 }
 
 function applyDemoAchievementThresholds(
@@ -1202,12 +1223,12 @@ function createFallbackDiaryImageAsset(entry: LobsterDiaryEntry) {
   return {
     id: `local-diary-image-fallback-${entry.id}-${Date.now()}`,
     type: 'image',
-    url: fallbackDiaryImageUrl,
-    mimeType: 'image/svg+xml',
+    url: pickFallbackDiaryImageUrl(),
+    mimeType: 'image/jpeg',
     prompt: entry.quote,
     source: 'local-fallback' as const,
-    provider: 'local-fallback',
-    model: 'q-lobster-placeholder',
+    provider: 'doubao-seedream-preset',
+    model: 'pre-generated-fallback',
     createdAt: new Date().toISOString(),
   }
 }
@@ -1264,6 +1285,34 @@ function replaceDiaryCards(
 
     return {
       ...line,
+      card: {
+        type: 'diary_card' as const,
+        entry,
+      },
+    }
+  })
+}
+
+function replaceFallbackDiaryCards(
+  lines: LobsterChatLine[],
+  entry?: LobsterDiaryEntry,
+) {
+  if (entry?.source !== 'real-ai') {
+    return lines
+  }
+
+  return lines.map((line) => {
+    if (
+      line.card?.type !== 'diary_card' ||
+      line.card.entry.source === 'real-ai'
+    ) {
+      return line
+    }
+
+    return {
+      ...line,
+      source: 'real-ai' as const,
+      outputId: entry.outputId,
       card: {
         type: 'diary_card' as const,
         entry,
@@ -1476,6 +1525,19 @@ function mergeSpacePostsRemotePreferred(
   )
 }
 
+function mergeSpacePostsKeepLocalMissing(
+  localPosts: LobsterSpacePost[],
+  remotePosts: LobsterSpacePost[],
+) {
+  const postsById = new Map<string, LobsterSpacePost>()
+  localPosts.forEach((post) => postsById.set(post.id, post))
+  remotePosts.forEach((post) => postsById.set(post.id, post))
+
+  return Array.from(postsById.values()).sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  )
+}
+
 function getPublishedSpacePostsFromChatLines(lines: LobsterChatLine[]) {
   return lines
     .filter(
@@ -1535,9 +1597,19 @@ async function recordLocalSpaceAwarenessEvent(
 ) {
   try {
     const output = await openclawClient.recordSpaceAwarenessEvent(event)
-    setState({
-      spacePosts: output.space.posts,
-      spaceUnlocked: output.space.posts.length > 0 || getState().spaceUnlocked,
+    setState((state) => {
+      const localPublishedPosts = getPublishedSpacePostsFromChatLines(
+        state.lobsterChatLines,
+      )
+      const posts = mergeSpacePostsKeepLocalMissing(
+        mergeSpacePostsKeepLocalMissing(localPublishedPosts, state.spacePosts),
+        output.space.posts,
+      )
+
+      return {
+        spacePosts: posts,
+        spaceUnlocked: posts.length > 0 || state.spaceUnlocked,
+      }
     })
 
       const postedPost = output.post
@@ -1612,8 +1684,6 @@ function getCheckInFeedback(checkInId: string) {
       '音乐小技能装好了，耳机挂饰也点亮了。',
     first_interest_feed_view:
       '这条音乐兴趣动态我记下了，后面会继续按你的兴趣轻轻提醒。',
-    interest_topic_streak_3:
-      '连续三次都聊到音乐了，我知道这真的是你的兴趣重点。',
     four_accessories_unlocked:
       '四个挂饰都点亮了，小钳的小背包现在完整了。',
   }
@@ -2007,6 +2077,8 @@ function createChatCapabilityPromptLine(
       '可以，我先把适合公开展示的一小段写成龙虾空间动态。点一下后只生成本地动态，不替你乱发到别处。',
     space_comment:
       '可以，我们先回龙虾空间看评论。我会只在自己的空间里回复，不替你去群聊或好友空间发言。',
+    open_hidden_diary:
+      '我先把今天的记录翻一遍，再把那页日记拿出来给你看。',
     interest_memory: '可以，我把兴趣记忆入口放在下面，点一下就展开给你看。',
     request_music_authorization:
       '可以，我先把授权范围和用途摆清楚。下面这张卡片需要你再点一次确认，点完之后我会慢慢整理音乐记忆，不会瞬间跳到后续步骤。',
@@ -2117,6 +2189,11 @@ async function runAchievementExperienceCapability(
 
   if (capability === 'interest_community') {
     await actions.showInterestCommunity(targetLineId)
+    return
+  }
+
+  if (capability === 'open_hidden_diary') {
+    await actions.openHiddenDiary()
   }
 }
 
@@ -2169,12 +2246,16 @@ function createInterestSuggestions(
     })
   }
 
-  if (
-    hasBadminton &&
+  const shouldSuggestCommunity =
     !state.lobsterChatLines.some(
       (line) => line.card?.type === 'interest_community',
-    )
-  ) {
+    ) &&
+    (hasBadminton ||
+      (hasMusic &&
+        state.demoRuntimeState.musicTalkCount >=
+          musicCommunityRecommendationThreshold))
+
+  if (shouldSuggestCommunity) {
     suggestions.push({
       id: 'interest-community',
       label: '看看同好群',
@@ -2450,6 +2531,48 @@ function createBadmintonCommunityNarrativeCard(): InterestNarrativeCard {
   }
 }
 
+function createMusicCommunityNarrativeCard(): InterestNarrativeCard {
+  return {
+    id: `interest-narrative-music-${Date.now()}`,
+    type: 'interest_community',
+    interest: 'music',
+    narrative:
+      '你最近连续聊到音乐，我找到一个只看公开资料也比较贴近的音乐同好群：深圳 Livehouse 同好群。公开资料里写着新歌、演出、歌单分享，比较适合继续聊歌手和现场。这里不读取群聊内容，也不会替你申请加入。',
+    title: '可能适合你的音乐同好群',
+    summary: '深圳 Livehouse 同好群，公开资料显示会聊新歌、演出和歌单分享。',
+    reason: '基于你连续聊到音乐，以及公开群名、标签和简介的匹配。',
+    sourceLabel: '公开群资料',
+    sourceType: 'public_group_profile',
+    riskNote: '未加入群，仅基于公开资料；不读取群聊消息，不替你提交入群申请。',
+    sourceDetail:
+      '只使用公开群名、公开标签和公开简介。是否进一步查看或申请加入，由你自己决定。',
+    community: {
+      id: 'public-music-livehouse-shenzhen',
+      title: '深圳 Livehouse 同好群',
+      tags: ['音乐', 'livehouse', '新歌', '演出'],
+      publicIntro: '公开资料显示：分享新歌、演出信息和现场体验。',
+      city: '深圳',
+      sourceLabel: '公开群资料',
+      reason: '公开资料与音乐、歌手、演出和歌单话题接近。',
+      boundary: '未加入群，仅基于公开资料。',
+    },
+    actions: [
+      {
+        id: 'view_source',
+        label: '查看公开资料',
+      },
+      {
+        id: 'favorite',
+        label: '收藏',
+      },
+      {
+        id: 'apply_to_join',
+        label: '申请加入',
+      },
+    ],
+  }
+}
+
 function createInterestNarrativeLine(
   card: InterestNarrativeCard,
   suggestions?: LobsterSuggestion[],
@@ -2489,8 +2612,33 @@ function createMusicReminderSuggestions(): LobsterSuggestion[] {
   ]
 }
 
-function createBadmintonCommunityLine(): LobsterChatLine {
-  return createInterestNarrativeLine(createBadmintonCommunityNarrativeCard(), [
+function createMusicReminderUnreadLine(content: string): LobsterChatLine {
+  return {
+    id: `music-reminder-unread-${Date.now()}`,
+    role: 'lobster',
+    content: `有一条新的音乐提醒：${content}`,
+    createdAt: new Date().toISOString(),
+    status: 'complete',
+    source: 'mock-fallback',
+  }
+}
+
+function createMusicReminderUnreadContent() {
+  const options = [
+    '林俊杰发布了新歌相关动态，和你保存的歌手兴趣对上了。我先标出来，今晚可以顺着这条聊。',
+    '周杰伦近期有演唱会/巡演相关消息更新，和你的音乐兴趣记忆匹配。想看来源的话我可以继续展开。',
+  ]
+  const index = Math.floor(Math.random() * options.length)
+  return options[index]
+}
+
+function createCommunityFallbackLine(interest: Interest = 'badminton'): LobsterChatLine {
+  const card =
+    interest === 'music'
+      ? createMusicCommunityNarrativeCard()
+      : createBadmintonCommunityNarrativeCard()
+
+  return createInterestNarrativeLine(card, [
     {
       id: 'community-source',
       label: '看公开资料',
@@ -2504,6 +2652,20 @@ function createBadmintonCommunityLine(): LobsterChatLine {
       payload: { capability: 'interest_memory' },
     },
   ])
+}
+
+function shouldAutoShowMusicCommunityRecommendation(state: LobsterAppState) {
+  return (
+    !state.demoRuntimeState.communityRecommendationShown &&
+    state.demoRuntimeState.musicTalkCount >= musicCommunityRecommendationThreshold &&
+    (state.lobsterProfile.interests.includes('music') ||
+      state.interestProfiles.some(
+        (profile) => profile.interest === 'music' && profile.enabled,
+      )) &&
+    !state.lobsterChatLines.some(
+      (line) => line.card?.type === 'interest_community',
+    )
+  )
 }
 
 function getUserSignal(content: string): PrivateChatInterestContext['userSignal'] {
@@ -4108,11 +4270,11 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
     await get().generateInterestSpacePostPreview(targetLineId)
   },
 
-  showInterestCommunity: async (targetLineId) => {
-    const fallbackLine = createBadmintonCommunityLine()
+  showInterestCommunity: async (targetLineId, interest = 'badminton') => {
+    const fallbackLine = createCommunityFallbackLine(interest)
     let line = fallbackLine
     try {
-      const result = await openclawClient.recommendInterestCommunity('badminton')
+      const result = await openclawClient.recommendInterestCommunity(interest)
       line = createInterestNarrativeLine(result.card, fallbackLine.suggestions)
     } catch {
       line = fallbackLine
@@ -4131,6 +4293,10 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       }))
     } else {
       set((state) => ({
+        demoRuntimeState: {
+          ...state.demoRuntimeState,
+          communityRecommendationShown: true,
+        },
         lobsterChatLines: [...state.lobsterChatLines, line],
       }))
     }
@@ -4604,7 +4770,7 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
     try {
       const space = await openclawClient.addSpaceComment({ postId, content })
       set((state) => ({
-        spacePosts: mergeSpacePostsRemotePreferred(state.spacePosts, space.posts),
+        spacePosts: mergeSpacePostsKeepLocalMissing(state.spacePosts, space.posts),
         spaceUnlocked: true,
       }))
     } catch {
@@ -4622,7 +4788,6 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
       set,
       get,
     )
-    const musicReminderLineId = `off-chat-music-push-${Date.now()}`
     let shouldTriggerMusicReminder = false
     set((state) => {
       shouldTriggerMusicReminder = !state.demoRuntimeState.musicPushSent
@@ -4631,24 +4796,18 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
             demoRuntimeState: {
               ...state.demoRuntimeState,
               musicPushSent: true,
+              pendingMusicReminderCount:
+                state.appView === 'lobster_chat'
+                  ? (state.demoRuntimeState.pendingMusicReminderCount ?? 0)
+                  : (state.demoRuntimeState.pendingMusicReminderCount ?? 0) + 1,
             },
             lobsterChatLines: [
               ...state.lobsterChatLines,
-              {
-                id: musicReminderLineId,
-                role: 'lobster',
-                content: '',
-                createdAt: new Date().toISOString(),
-                status: 'generating',
-                source: 'mock-fallback',
-              },
+              createMusicReminderUnreadLine(createMusicReminderUnreadContent()),
             ],
           }
         : state
     })
-    if (shouldTriggerMusicReminder) {
-      void get().showMusicInterestReminder(musicReminderLineId)
-    }
     void get().replyToSpaceComment(postId, commentId)
   },
 
@@ -5036,6 +5195,14 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
         )
       }
       await runAchievementExperienceCapability(capability, get(), lobsterLineId)
+      if (capability === 'open_hidden_diary') {
+        set((state) => ({
+          lobsterChatLines: updateChatLine(state.lobsterChatLines, lobsterLineId, {
+            status: 'complete',
+            source: 'mock-fallback',
+          }),
+        }))
+      }
       set((state) =>
         consumePendingDiaryRevealPromptOnLine(
           state,
@@ -5058,6 +5225,8 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
     const lobsterLineId = `lobster-${timestamp}`
     let shouldCompleteFirstChat = false
     let shouldPrewarmDiary = false
+    let shouldAutoShowCommunity =
+      shouldAutoShowMusicCommunityRecommendation(currentState)
 
     set((state) => {
       if (state.lobsterChatBusy) {
@@ -5164,13 +5333,6 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
           shouldConsumeDiaryRevealPrompt,
           nextDemoRuntimeState,
         )
-        const nextCompletedCheckInIds = completeInterestTopicStreakIfReady({
-          ...state,
-          completedCheckInIds: firstChatDone
-            ? state.completedCheckInIds
-            : completedCheckInIds,
-          demoRuntimeState: nextDemoRuntimeState,
-        })
         const nextChatLines = updateChatLine(
           state.lobsterChatLines,
           lobsterLineId,
@@ -5184,10 +5346,11 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
             suggestions: promptResult.suggestions,
           },
         )
-
         return {
           lobsterChatBusy: false,
-          completedCheckInIds: nextCompletedCheckInIds,
+          completedCheckInIds: firstChatDone
+            ? state.completedCheckInIds
+            : completedCheckInIds,
           currentCheckInId: firstChatDone
             ? state.currentCheckInId
             : getNextCheckInId('first_lobster_chat') ?? state.currentCheckInId,
@@ -5256,6 +5419,11 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
         return
       }
 
+      if (shouldAutoShowCommunity) {
+        await get().showInterestCommunity(undefined, 'music')
+        return
+      }
+
       let localInterestUpdate = extractLocalInterestUpdate(chatInput.content)
       try {
         const interestResult = await openclawClient.saveInterestFromChat(
@@ -5275,9 +5443,6 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
                 })
               : state.lobsterChatLines,
           }))
-          if (get().demoRuntimeState.musicTalkCount >= musicTopicStreakThreshold) {
-            get().completeCheckIn('interest_topic_streak_3')
-          }
           return
         }
 
@@ -5330,9 +5495,6 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
             }),
           }
         })
-        if (get().demoRuntimeState.musicTalkCount >= musicTopicStreakThreshold) {
-          get().completeCheckIn('interest_topic_streak_3')
-        }
       }
     } catch {
       set((state) => ({
@@ -5377,6 +5539,20 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
                 )
               : null
           const interestProfiles = bootstrap.interestProfiles ?? state.interestProfiles
+          const diaryEntries = bootstrap.diary?.entries
+            ? normalizeDiaryEntries(bootstrap.diary.entries)
+            : state.diaryEntries
+          const realDiaryEntry = diaryEntries.find(
+            (entry) => entry.source === 'real-ai',
+          )
+          const currentChatLines = replaceFallbackDiaryCards(
+            state.lobsterChatLines,
+            realDiaryEntry,
+          )
+          const restoredDiaryChatLines = replaceFallbackDiaryCards(
+            restoredChatLines,
+            realDiaryEntry,
+          )
           const musicAuthorizationStatus = hasMusicProfile(interestProfiles)
             ? 'authorized'
             : (bootstrap.lobster?.interests ?? state.lobsterProfile.interests).includes(
@@ -5409,9 +5585,7 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
               bootstrap.diary?.triggered ?? state.diaryTriggered,
             diarySurpriseVisible: false,
             diaryUnlocked: bootstrap.diary?.revealed ?? state.diaryUnlocked,
-            diaryEntries: bootstrap.diary?.entries
-              ? normalizeDiaryEntries(bootstrap.diary.entries)
-              : state.diaryEntries,
+            diaryEntries,
             spacePosts: bootstrap.space?.posts ?? state.spacePosts,
             spaceUnlocked:
               (bootstrap.space?.posts.length ?? 0) > 0 || state.spaceUnlocked,
@@ -5419,13 +5593,13 @@ export const useLobsterStore = create<LobsterAppState>((set, get) => ({
             musicAuthorizationStatus,
             seenAchievementMomentIds,
             lobsterChatLines:
-              state.lobsterChatLines.length > 0
-                ? state.lobsterChatLines
-                : restoredChatLines.length > 0
-                  ? restoredChatLines
+              currentChatLines.length > 0
+                ? currentChatLines
+                : restoredDiaryChatLines.length > 0
+                  ? restoredDiaryChatLines
                   : restoredSummaryLine
                     ? [restoredSummaryLine]
-                    : state.lobsterChatLines,
+                    : currentChatLines,
           }
         })
 

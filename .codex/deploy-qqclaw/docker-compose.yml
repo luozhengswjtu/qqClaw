@@ -1,0 +1,53 @@
+name: qqclaw
+
+services:
+  qqclaw-api:
+    image: node:24-bookworm-slim
+    restart: unless-stopped
+    working_dir: /app
+    command: ["node", "--env-file=.env.production", "src/server.js"]
+    mem_limit: 256m
+    environment:
+      OPENCLAW_HOST: 0.0.0.0
+      OPENCLAW_PORT: "8787"
+      OPENCLAW_DB_PATH: /data/openclaw.sqlite
+      OPENCLAW_CORS_ORIGIN: https://qqclaw.xiaobinke.com
+      OPENCLAW_IMAGE_OUTPUT_DIR: /data/generated-images
+      OPENCLAW_IMAGE_PUBLIC_PATH: /generated-images
+    volumes:
+      - ./api/package.json:/app/package.json:ro
+      - ./api/src:/app/src:ro
+      - ./api/.env.production:/app/.env.production:ro
+      - ./data:/data
+    expose:
+      - "8787"
+    healthcheck:
+      test: ["CMD", "node", "-e", "const http=require('node:http');const req=http.request({host:'127.0.0.1',port:8787,path:'/health'},(res)=>process.exit(res.statusCode===200?0:1));req.on('error',()=>process.exit(1));req.end();"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - edge
+
+  qqclaw-web:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    volumes:
+      - ./web:/srv/qqclaw:ro
+      - ./Caddyfile.web:/etc/caddy/Caddyfile:ro
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - edge
+
+networks:
+  edge:
+    external: true
+    name: mycontent-edge

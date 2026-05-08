@@ -19,7 +19,7 @@ function getImageConfig() {
     apiKey: process.env.OPENCLAW_IMAGE_API_KEY || '',
     model:
       process.env.OPENCLAW_IMAGE_MODEL || 'doubao-seedream-5-0-lite',
-    size: process.env.OPENCLAW_IMAGE_SIZE || '2:3',
+    size: process.env.OPENCLAW_IMAGE_SIZE || '16:9',
     resolution: process.env.OPENCLAW_IMAGE_RESOLUTION || '2K',
     outputFormat: process.env.OPENCLAW_IMAGE_OUTPUT_FORMAT || '',
     timeoutMs: Number(process.env.OPENCLAW_IMAGE_TIMEOUT_MS || 180000),
@@ -52,6 +52,18 @@ export function getImageStatus() {
   }
 }
 
+const presetDiaryFallbackUrls = [
+  '/diary-fallbacks/diary-fallback-01.jpg',
+  '/diary-fallbacks/diary-fallback-02.jpg',
+  '/diary-fallbacks/diary-fallback-03.jpg',
+  '/diary-fallbacks/diary-fallback-04.jpg',
+]
+
+function pickPresetDiaryFallbackUrl() {
+  const index = Math.floor(Math.random() * presetDiaryFallbackUrls.length)
+  return presetDiaryFallbackUrls[index]
+}
+
 function buildDiaryImagePrompt(entry, lobster) {
   const title = String(entry?.title || 'Hidden lobster diary')
   const quote = String(entry?.quote || '')
@@ -61,41 +73,28 @@ function buildDiaryImagePrompt(entry, lobster) {
   return [
     'Create one polished diary card image for a QQ pet companion app.',
     `Main character: a cute chubby Q-style red lobster named ${lobsterName}, friendly, expressive, and slightly secretive.`,
-    'Scene: warm scrapbook paper, compact QQ Zone diary mood, small stickers, desk lamp glow, soft shadows.',
-    'Composition: vertical card, leave clean empty areas for title and body text overlay, no readable small text.',
+    'Scene: warm desk diary moment, compact QQ Zone mood, small stickers, desk lamp glow, soft shadows.',
+    'Composition: landscape cover image for a chat card, subject and props should fill the frame, no large blank paper panel and no empty text overlay area.',
     `Diary title reference: ${title}`,
     quote ? `Mood quote reference: ${quote}` : '',
     achievement ? `Achievement reference: ${achievement}` : '',
-    'Style: refined mobile app illustration, cozy but not beige-only, crisp details, no watermark.',
+    'Style: refined mobile app illustration, cozy but not beige-only, crisp details, no readable text, no watermark.',
   ]
     .filter(Boolean)
     .join('\n')
 }
 
 function mockImageOutput(input, durationMs, errorMessage) {
-  const svg = [
-    '<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1536" viewBox="0 0 1024 1536">',
-    '<rect width="1024" height="1536" fill="#fff7e8"/>',
-    '<rect x="96" y="96" width="832" height="1344" rx="48" fill="#ffffff" stroke="#f2b8a8" stroke-width="6"/>',
-    '<circle cx="512" cy="430" r="180" fill="#ff7a59"/>',
-    '<circle cx="442" cy="380" r="28" fill="#1f2937"/>',
-    '<circle cx="582" cy="380" r="28" fill="#1f2937"/>',
-    '<path d="M420 500 Q512 570 604 500" fill="none" stroke="#1f2937" stroke-width="22" stroke-linecap="round"/>',
-    '<text x="512" y="790" text-anchor="middle" font-family="Arial, sans-serif" font-size="54" fill="#1f2937">Diary Image</text>',
-    '<text x="512" y="870" text-anchor="middle" font-family="Arial, sans-serif" font-size="34" fill="#64748b">mock fallback</text>',
-    '</svg>',
-  ].join('')
-  const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
   return {
     image: {
       id: `image-${Date.now()}-${randomUUID()}`,
       type: input.type,
-      url,
-      mimeType: 'image/svg+xml',
+      url: pickPresetDiaryFallbackUrl(),
+      mimeType: 'image/jpeg',
       prompt: input.prompt,
       source: 'mock-fallback',
-      provider: 'mock',
-      model: 'mock',
+      provider: 'doubao-seedream-preset',
+      model: 'pre-generated-fallback',
       createdAt: new Date().toISOString(),
       errorMessage: errorMessage || null,
     },

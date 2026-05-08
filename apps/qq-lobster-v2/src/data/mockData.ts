@@ -527,13 +527,6 @@ export const lobsterCheckIns: CheckInItem[] = [
     rewardId: undefined,
   },
   {
-    id: 'interest_topic_streak_3',
-    title: '连续三次讨论兴趣话题',
-    description: '连续三次和小龙虾讨论音乐兴趣话题。',
-    status: 'locked',
-    rewardId: undefined,
-  },
-  {
     id: 'four_accessories_unlocked',
     title: '解锁四个挂饰',
     description: '小龙虾的四个可佩戴挂饰全部点亮。',
@@ -667,17 +660,6 @@ export const mockAchievements: AchievementCatalogItem[] = [
     hidden: false,
     hint: '查看一次音乐兴趣动态。',
     triggerCheckInId: 'first_interest_feed_view',
-  },
-  {
-    key: 'interest_topic_streak_3',
-    id: 'interest_topic_streak_3',
-    title: '连续三次讨论兴趣话题',
-    description: '你连续三次和小龙虾讨论了音乐兴趣话题。',
-    status: 'locked',
-    reward: '兴趣讨论点亮',
-    hidden: false,
-    hint: '连续发送三条音乐相关聊天。',
-    triggerCheckInId: 'interest_topic_streak_3',
   },
   {
     key: 'four_accessories_unlocked',

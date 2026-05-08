@@ -537,6 +537,7 @@ function getMockQqMusicSignals(profile) {
   }
 
   const topics = profile?.topics?.length ? profile.topics : ['林俊杰', '周杰伦']
+  const secondaryTopic = topics[1] || topics[0]
   const city = profile?.city || '深圳'
   const listeningSnapshot = getMockQqMusicListeningSnapshot()
 
@@ -548,8 +549,8 @@ function getMockQqMusicSignals(profile) {
       {
         id: 'mock-music-signal-jj-lin-shenzhen',
         interest: 'music',
-        title: `${topics[0]}有新动态`,
-        summary: `${topics[0]}${city}演出信息有更新。`,
+        title: `${topics[0]}演唱会消息更新`,
+        summary: `${topics[0]}${city}演唱会信息有更新，可以作为一条音乐提醒。`,
         topics: [topics[0], '演唱会'].filter(Boolean),
         city,
         sourceType: 'qq_music',
@@ -559,9 +560,9 @@ function getMockQqMusicSignals(profile) {
       {
         id: 'mock-music-signal-playlist',
         interest: 'music',
-        title: '常听风格可以整理',
-        summary: `最近播放和歌单快照里，${topics.slice(0, 3).join('、')}出现频繁。`,
-        topics,
+        title: `${secondaryTopic}发布了新歌相关动态`,
+        summary: `${secondaryTopic}有新歌相关消息，和你保存的音乐兴趣匹配。`,
+        topics: [secondaryTopic, '新歌'].filter(Boolean),
         city,
         sourceType: 'qq_music',
         sourceLabel: authorization.sourceLabel,
@@ -574,6 +575,30 @@ function getMockQqMusicSignals(profile) {
 function getPublicInterestGroupProfiles(interest) {
   const normalized = normalizeInterest(interest) || 'badminton'
   const allGroups = [
+    {
+      id: 'public-group-music-livehouse-shenzhen',
+      interest: 'music',
+      title: '深圳 Livehouse 同好群',
+      tags: ['音乐', 'livehouse', '新歌', '演出'],
+      city: '深圳',
+      memberCount: 96,
+      publicIntro: '公开群资料显示：分享新歌、演出信息和现场体验。',
+      sourceType: 'public_group_profile',
+      sourceLabel: '公开群资料',
+      publicOnly: true,
+    },
+    {
+      id: 'public-group-music-playlist-night',
+      interest: 'music',
+      title: '晚间歌单交换所',
+      tags: ['音乐', '歌单', '林俊杰', '周杰伦'],
+      city: '线上',
+      memberCount: 142,
+      publicIntro: '公开群资料显示：交换最近循环歌单，讨论歌手和新歌。',
+      sourceType: 'public_group_profile',
+      sourceLabel: '公开群资料',
+      publicOnly: true,
+    },
     {
       id: 'public-group-badminton-nanshan',
       interest: 'badminton',
@@ -3332,13 +3357,16 @@ function runMockTool(tool, input) {
     const publicGroups = Array.isArray(input.publicGroups)
       ? input.publicGroups
       : getPublicInterestGroupProfiles(interest)
+    const firstGroup = publicGroups[0]
 
     return {
       card: {
         type: 'interest_community',
         interest,
         narrative:
-          '我发现一个可能适合你的羽毛球群：深圳南山周末羽毛球搭子群。它看起来像是会有人周末固定约球，新手也比较容易开口。公开资料显示：周末约球、固定场地、新手友好，和你之前说的“想找固定搭子”比较接近。',
+          firstGroup
+            ? `我发现一个可能适合你的${interest === 'music' ? '音乐' : '兴趣'}同好群：${firstGroup.title}。${firstGroup.publicIntro} 我只看公开资料，不读取群聊内容，也不会替你申请加入。`
+            : '暂时没有匹配的公开社群资料。我不会读取未授权群聊，也不会替你申请加入。',
         title: '公开社群资料推荐',
         summary: publicGroups.length
           ? `${publicGroups[0].title} 和你的兴趣标签较接近。`
@@ -3366,7 +3394,9 @@ function runMockTool(tool, input) {
               city: publicGroups[0].city,
               sourceLabel: publicGroups[0].sourceLabel,
               reason:
-                '公开资料与固定搭子、周末约球、新手友好的兴趣记忆接近。',
+                interest === 'music'
+                  ? '公开资料与音乐、歌手、演出和歌单话题接近。'
+                  : '公开资料与固定搭子、周末约球、新手友好的兴趣记忆接近。',
               boundary: '未加入群，仅基于公开资料。',
             }
           : undefined,
@@ -3871,6 +3901,10 @@ function getHiddenDiaryEntry() {
   return row ? rowToMemory(row).value : null
 }
 
+function getReusableHiddenDiaryEntry(entry) {
+  return entry?.source === 'real-ai' ? entry : null
+}
+
 export function getDiaryTriggerContext() {
   const lobster = rowToLobster(
     db.prepare('SELECT * FROM lobsters WHERE user_id = ?').get('u-me'),
@@ -3952,7 +3986,7 @@ export function getDiaryTriggerContext() {
 
 export function getHiddenDiaryState() {
   const context = getDiaryTriggerContext()
-  const entry = getHiddenDiaryEntry()
+  const entry = getReusableHiddenDiaryEntry(getHiddenDiaryEntry())
 
   return {
     eligible: context.eligible,

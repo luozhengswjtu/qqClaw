@@ -67,6 +67,7 @@ export interface DemoRuntimeState {
   musicPushSent: boolean
   behaviorPushSent: boolean
   leftChatAt: string | null
+  pendingMusicReminderCount: number
   pendingSpaceReplyCount: number
 }
 
