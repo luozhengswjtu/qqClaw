@@ -292,6 +292,12 @@ export const openclawClient = {
     return requestJson<OpenClawBootstrap>('/api/bootstrap')
   },
 
+  resetDemoState() {
+    return requestJson<OpenClawBootstrap>('/api/demo/reset', {
+      method: 'POST',
+    })
+  },
+
   saveAdoption(input: OpenClawAdoptionInput) {
     return requestJson<{
       lobster: LobsterProfile

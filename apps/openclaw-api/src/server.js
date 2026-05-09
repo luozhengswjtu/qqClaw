@@ -31,6 +31,7 @@ import {
   recordInterestEvent,
   recordReviewResult,
   revealHiddenDiaryEntry,
+  resetDemoState,
   resolveCapability,
   saveAdoption,
   saveInterestProfile,
@@ -426,6 +427,11 @@ async function route(request, response) {
 
   if (request.method === 'GET' && path === '/api/bootstrap') {
     sendJson(response, 200, getBootstrap())
+    return
+  }
+
+  if (request.method === 'POST' && path === '/api/demo/reset') {
+    sendJson(response, 200, resetDemoState())
     return
   }
 

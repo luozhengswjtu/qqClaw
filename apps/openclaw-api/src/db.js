@@ -2141,6 +2141,47 @@ export function initDb() {
   migrateInterestProfileMemoriesToTable()
 }
 
+export function resetDemoState() {
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    db.exec(`
+      DELETE FROM events;
+      DELETE FROM memories;
+      DELETE FROM interest_events;
+      DELETE FROM interest_profiles;
+      DELETE FROM review_results;
+      DELETE FROM review_policies;
+      DELETE FROM tool_runs;
+      DELETE FROM tools;
+      DELETE FROM capabilities;
+      DELETE FROM ai_requests;
+      DELETE FROM space_interactions;
+      DELETE FROM space_comments;
+      DELETE FROM space_posts;
+      DELETE FROM lobster_chat_lines;
+      DELETE FROM agent_outputs;
+      DELETE FROM achievements;
+      DELETE FROM rewards;
+      DELETE FROM work_logs;
+      DELETE FROM checkins;
+      DELETE FROM permissions;
+      DELETE FROM messages;
+      DELETE FROM groups;
+      DELETE FROM lobsters;
+      DELETE FROM users;
+    `)
+    insertSeedRows()
+    insertAgentSeedRows()
+    migrateInterestProfileMemoriesToTable()
+    db.exec('COMMIT')
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
+
+  return getBootstrap()
+}
+
 export function getBootstrap() {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get('u-me')
   const lobster = rowToLobster(
